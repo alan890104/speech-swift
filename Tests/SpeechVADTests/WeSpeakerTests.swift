@@ -12,7 +12,7 @@ final class WeSpeakerTests: XCTestCase {
         XCTAssertEqual(config.onset, 0.5, accuracy: 0.001)
         XCTAssertEqual(config.offset, 0.3, accuracy: 0.001)
         XCTAssertEqual(config.minSpeechDuration, 0.3, accuracy: 0.001)
-        XCTAssertEqual(config.clusteringThreshold, 0.5, accuracy: 0.001)
+        XCTAssertEqual(config.minSpeakers, 0)
         XCTAssertEqual(config.maxSpeakers, 0)
     }
 
@@ -555,6 +555,25 @@ final class WeSpeakerTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(seg.startTime, 0)
             XCTAssertGreaterThan(seg.endTime, seg.startTime)
         }
+    }
+
+    // MARK: - E2E: Min/Max Speakers Constraints
+
+    func testE2EMinSpeakersConstraint() async throws {
+        let pipeline = try await DiarizationPipeline.fromPretrained()
+
+        let audioURL = URL(fileURLWithPath: "Tests/Qwen3ASRTests/Resources/test_audio.wav")
+        guard FileManager.default.fileExists(atPath: audioURL.path) else {
+            throw XCTSkip("Test audio file not found")
+        }
+
+        let (samples, sampleRate) = try AudioFileLoader.loadWAV(url: audioURL)
+
+        // Force at least 2 speakers — GMM-BIC should respect the constraint
+        let config = DiarizationConfig(minSpeakers: 2)
+        let result = pipeline.diarize(audio: samples, sampleRate: sampleRate, config: config)
+        XCTAssertGreaterThanOrEqual(result.numSpeakers, 2,
+                                     "minSpeakers=2 should force at least 2 speakers, got \(result.numSpeakers)")
     }
 
     // MARK: - E2E: Embedding Different Audio Produces Different Embeddings

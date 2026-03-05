@@ -12,8 +12,8 @@ public struct DiarizeCommand: ParsableCommand {
     @Argument(help: "Audio file to analyze (WAV, any sample rate)")
     public var audioFile: String
 
-    @Option(name: .long, help: "Clustering distance threshold (0.0-2.0)")
-    public var threshold: Float = DiarizationConfig.default.clusteringThreshold
+    @Option(name: .long, help: "Minimum number of speakers (0 = auto)")
+    public var minSpeakers: Int = 0
 
     @Option(name: .long, help: "Maximum number of speakers (0 = auto)")
     public var maxSpeakers: Int = 0
@@ -43,7 +43,7 @@ public struct DiarizeCommand: ParsableCommand {
             }
 
             let config = DiarizationConfig(
-                clusteringThreshold: threshold,
+                minSpeakers: minSpeakers,
                 maxSpeakers: maxSpeakers
             )
 
