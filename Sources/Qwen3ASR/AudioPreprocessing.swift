@@ -282,12 +282,21 @@ public class WhisperFeatureExtractor {
         let trimmedFrames = nFrames - 1
         let trimmedMelSpec = Array(melSpec.prefix(trimmedFrames * nMels))
 
-        // No truncation — Qwen3-ASR encoder handles arbitrary-length audio via windowed
-        // attention. The chunkLength=30 from preprocessor_config.json is inherited from the
-        // HuggingFace WhisperFeatureExtractor class but is not enforced by the official
-        // Qwen3-ASR pipeline (which processes up to 1200 seconds).
-        let finalMelSpec = trimmedMelSpec
-        let finalFrames = trimmedFrames
+        // Qwen3-ASR encoder handles arbitrary-length audio via windowed attention.
+        // The chunkLength=30 from preprocessor_config.json is inherited from the HuggingFace
+        // WhisperFeatureExtractor class but is not enforced by the official Qwen3-ASR pipeline.
+        // Cap at 1200 seconds (120000 frames) to match the official pipeline's upper bound
+        // and prevent OOM on extremely long inputs.
+        let maxFrames = 1200 * sampleRate / hopLength  // 120000 frames at 16kHz/160hop
+        let finalFrames: Int
+        let finalMelSpec: [Float]
+        if trimmedFrames > maxFrames {
+            finalFrames = maxFrames
+            finalMelSpec = Array(trimmedMelSpec.prefix(maxFrames * nMels))
+        } else {
+            finalFrames = trimmedFrames
+            finalMelSpec = trimmedMelSpec
+        }
 
         let array = MLXArray(finalMelSpec, [finalFrames, nMels])
         return array.transposed(1, 0)  // [mel_bins, time_frames]
