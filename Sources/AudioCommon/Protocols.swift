@@ -97,12 +97,33 @@ public protocol SpeechGenerationModel: AnyObject {
 
 // MARK: - Speech Recognition (STT)
 
+/// Result of speech recognition including detected language.
+public struct TranscriptionResult: Sendable {
+    public let text: String
+    /// Detected language (e.g. "english", "russian"). Nil if model doesn't detect.
+    public let language: String?
+
+    public init(text: String, language: String? = nil) {
+        self.text = text
+        self.language = language
+    }
+}
+
 /// A speech-to-text model that transcribes audio.
 public protocol SpeechRecognitionModel: AnyObject {
     /// Expected input sample rate in Hz
     var inputSampleRate: Int { get }
     /// Transcribe audio to text
     func transcribe(audio: [Float], sampleRate: Int, language: String?) -> String
+    /// Transcribe audio to text with language detection
+    func transcribeWithLanguage(audio: [Float], sampleRate: Int, language: String?) -> TranscriptionResult
+}
+
+/// Default implementation: delegates to transcribe() with no language detection.
+public extension SpeechRecognitionModel {
+    func transcribeWithLanguage(audio: [Float], sampleRate: Int, language: String?) -> TranscriptionResult {
+        TranscriptionResult(text: transcribe(audio: audio, sampleRate: sampleRate, language: language))
+    }
 }
 
 // MARK: - Forced Alignment
@@ -149,6 +170,20 @@ public protocol VoiceActivityDetectionModel: AnyObject {
     var inputSampleRate: Int { get }
     /// Detect speech segments in audio
     func detectSpeech(audio: [Float], sampleRate: Int) -> [SpeechSegment]
+}
+
+/// A streaming VAD that processes fixed-size audio chunks and returns speech probability.
+///
+/// Maps directly to speech-core's `sc_vad_vtable_t` for pipeline integration.
+public protocol StreamingVADProvider: AnyObject {
+    /// Expected input sample rate in Hz
+    var inputSampleRate: Int { get }
+    /// Number of samples per chunk
+    var chunkSize: Int { get }
+    /// Process a single audio chunk, returns speech probability in [0, 1]
+    func processChunk(_ samples: [Float]) -> Float
+    /// Reset internal state (LSTM hidden state, context buffer, etc.)
+    func resetState()
 }
 
 // MARK: - Speaker Diarization

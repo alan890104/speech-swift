@@ -39,6 +39,9 @@ Tests/**/test_audio_roundtrip.wav
 blog/
 docs/blog-*.md
 
+# XCFrameworks (built externally)
+Frameworks/
+
 # Built app bundles
 *.app/
 
