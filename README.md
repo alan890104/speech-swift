@@ -8,7 +8,7 @@ AI speech models for Apple Silicon, powered by [MLX Swift](https://github.com/ml
 - **Parakeet TDT** — Speech-to-text via CoreML (Neural Engine, FastConformer + TDT decoder)
 - **Qwen3-ForcedAligner** — Word-level timestamp alignment (audio + text → timestamps)
 - **Qwen3-TTS** — Text-to-speech synthesis (highest quality, custom speakers)
-- **CosyVoice TTS** — Text-to-speech with streaming and voice cloning (9 languages, DiT flow matching, CAM++ speaker encoder)
+- **CosyVoice TTS** — Text-to-speech with streaming, voice cloning, multi-speaker dialogue, and emotion tags (9 languages, DiT flow matching, CAM++ speaker encoder)
 - **Kokoro TTS** — On-device text-to-speech (82M params, CoreML/Neural Engine, 50 voices, iOS-ready)
 - **PersonaPlex** — Full-duplex speech-to-speech (7B, audio in → audio out)
 - **DeepFilterNet3** — Speech enhancement / noise suppression (2.1M params, real-time 48kHz)
@@ -73,7 +73,7 @@ Weight memory is the GPU (MLX) or ANE (CoreML) memory consumed by model paramete
 ### When to Use Which TTS
 
 - **Qwen3-TTS**: Best quality, streaming (~120ms), 9 built-in speakers, 10 languages, batch synthesis
-- **CosyVoice TTS**: Streaming (~150ms), 9 languages, voice cloning (CAM++ speaker encoder), DiT flow matching + HiFi-GAN vocoder
+- **CosyVoice TTS**: Streaming (~150ms), 9 languages, voice cloning (CAM++ speaker encoder), multi-speaker dialogue (`[S1] ... [S2] ...`), inline emotion/style tags (`(happy)`, `(whispers)`), DiT flow matching + HiFi-GAN vocoder
 - **Kokoro TTS**: Lightweight iOS-ready TTS (82M params), CoreML/Neural Engine, 50 voices, 10 languages, non-autoregressive (single forward pass)
 - **PersonaPlex**: Full-duplex speech-to-speech (audio in → audio out), streaming (~2s chunks), 18 voice presets, based on Moshi architecture
 
@@ -592,6 +592,21 @@ make build
 
 # Voice cloning (downloads CAM++ speaker encoder on first use)
 .build/release/audio speak "Hello world" --engine cosyvoice --voice-sample reference.wav --output cloned.wav
+
+# Multi-speaker dialogue with voice cloning
+.build/release/audio speak "[S1] Hello there! [S2] Hey, how are you?" \
+    --engine cosyvoice --speakers s1=alice.wav,s2=bob.wav -o dialogue.wav
+
+# Inline emotion/style tags
+.build/release/audio speak "(excited) Wow, amazing! (sad) But I have to go..." \
+    --engine cosyvoice -o emotion.wav
+
+# Combined: dialogue + emotions + voice cloning
+.build/release/audio speak "[S1] (happy) Great news! [S2] (surprised) Really?" \
+    --engine cosyvoice --speakers s1=alice.wav,s2=bob.wav -o combined.wav
+
+# Custom style instruction
+.build/release/audio speak "Hello world" --engine cosyvoice --cosy-instruct "Speak cheerfully" -o cheerful.wav
 
 # Streaming synthesis
 .build/release/audio speak "Hello world" --engine cosyvoice --language english --stream --output output.wav
