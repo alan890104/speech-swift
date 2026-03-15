@@ -184,8 +184,12 @@ public final class KokoroTTSModel {
     /// Load a pretrained Kokoro model from HuggingFace.
     ///
     /// Downloads CoreML models and voice embeddings on first use, then caches locally.
+    /// Default voice preset.
+    public static let defaultVoice = "af_heart"
+
     public static func fromPretrained(
         modelId: String = defaultModelId,
+        voice: String = defaultVoice,
         progressHandler: ((Double, String) -> Void)? = nil
     ) async throws -> KokoroTTSModel {
         AudioLog.modelLoading.info("Loading Kokoro model: \(modelId)")
@@ -198,50 +202,33 @@ public final class KokoroTTSModel {
                 modelId: modelId, reason: "Failed to resolve cache directory", underlying: error)
         }
 
-        // Download model files
+        // Download single model variant + config + single voice.
+        // kokoro_21_5s is the smallest bucket (max 124 tokens, ~5s audio)
+        // — sufficient for short TTS and uses less memory than larger buckets.
         progressHandler?(0.0, "Downloading model...")
         do {
             try await HuggingFaceDownloader.downloadWeights(
                 modelId: modelId,
                 to: cacheDir,
                 additionalFiles: [
-                    // CoreML models (compiled)
-                    "kokoro_24_10s.mlmodelc/**",
-                    "kokoro_24_15s.mlmodelc/**",
                     "kokoro_21_5s.mlmodelc/**",
-                    "kokoro_21_10s.mlmodelc/**",
-                    "kokoro_21_15s.mlmodelc/**",
-                    // G2P models
                     "G2PEncoder.mlmodelc/**",
                     "G2PDecoder.mlmodelc/**",
-                    // Vocabularies and dictionaries
                     "vocab_index.json",
                     "g2p_vocab.json",
                     "us_gold.json",
                     "us_silver.json",
+                    "voices/\(voice).json",
                 ]
             ) { fraction in
-                progressHandler?(fraction * 0.6, "Downloading model...")
+                progressHandler?(fraction * 0.7, "Downloading model...")
             }
         } catch {
             throw AudioModelError.modelLoadFailed(
                 modelId: modelId, reason: "Download failed", underlying: error)
         }
 
-        // Download voice files
-        progressHandler?(0.60, "Downloading voice embeddings...")
         let voicesDir = cacheDir.appendingPathComponent("voices")
-        do {
-            try await HuggingFaceDownloader.downloadWeights(
-                modelId: modelId,
-                to: cacheDir,
-                additionalFiles: ["voices/**"]
-            ) { fraction in
-                progressHandler?(0.6 + fraction * 0.1, "Downloading voices...")
-            }
-        } catch {
-            AudioLog.modelLoading.warning("Voice download failed: \(error)")
-        }
 
         // Load config
         progressHandler?(0.70, "Loading configuration...")
