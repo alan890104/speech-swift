@@ -105,12 +105,15 @@ def compute_vad_metrics(ref_segments: list, hyp_segments: list,
 # Run VAD via CLI
 # ---------------------------------------------------------------------------
 
-def run_vad(cli_path: str, audio_path: str, engine: str = "mlx",
+def run_vad(cli_path: str, audio_path: str, engine: str = "pyannote",
             timeout: int = 300) -> list:
     """Run VAD on an audio file, return list of (start, end) segments."""
-    cmd = [cli_path, "vad", str(audio_path)]
-    if engine == "coreml":
-        cmd.extend(["--engine", "coreml"])
+    if engine == "silero":
+        # Silero uses vad-stream command
+        cmd = [cli_path, "vad-stream", str(audio_path)]
+    else:
+        # Pyannote uses vad command
+        cmd = [cli_path, "vad", str(audio_path)]
 
     result = subprocess.run(
         cmd, capture_output=True, text=True, timeout=timeout)
@@ -118,12 +121,26 @@ def run_vad(cli_path: str, audio_path: str, engine: str = "mlx",
     if result.returncode != 0:
         return []
 
-    # Parse output: [0.10s - 0.73s] (0.63s) or [5.22s-8.38s]
     segments = []
-    for line in result.stdout.split("\n"):
-        m = re.search(r"\[([\d.]+)s\s*[-–]\s*([\d.]+)s\]", line)
-        if m:
-            segments.append((float(m.group(1)), float(m.group(2))))
+
+    if engine == "silero":
+        # Parse: [2.50s] Speech started / [6.02s] Speech ended (3.52s)
+        current_start = None
+        for line in result.stdout.split("\n"):
+            m = re.search(r"\[([\d.]+)s\]\s*Speech started", line)
+            if m:
+                current_start = float(m.group(1))
+            m = re.search(r"\[([\d.]+)s\]\s*Speech ended", line)
+            if m and current_start is not None:
+                segments.append((current_start, float(m.group(1))))
+                current_start = None
+    else:
+        # Parse: [0.10s - 0.73s] (0.63s)
+        for line in result.stdout.split("\n"):
+            m = re.search(r"\[([\d.]+)s\s*[-–]\s*([\d.]+)s\]", line)
+            if m:
+                segments.append((float(m.group(1)), float(m.group(2))))
+
     return segments
 
 
@@ -299,9 +316,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="VAD benchmark (VoxConverse + FireRedVAD comparison)")
     parser.add_argument("--cli-path", default=".build/release/audio")
-    parser.add_argument("--engine", default="mlx",
-                        choices=["mlx", "coreml"],
-                        help="VAD engine: mlx (Pyannote), coreml (Silero)")
+    parser.add_argument("--engine", default="pyannote",
+                        choices=["pyannote", "silero"],
+                        help="VAD engine: pyannote (MLX) or silero (streaming)")
     parser.add_argument("--num-files", type=int, default=0,
                         help="Limit number of files (0 = all)")
     parser.add_argument("--timeout", type=int, default=300)
@@ -322,7 +339,7 @@ def main():
 
     if args.compare:
         all_results = []
-        for engine in ["mlx", "coreml"]:
+        for engine in ["pyannote", "silero"]:
             print(f"\n--- VAD engine: {engine} ---")
             per_file = run_benchmark(
                 args.cli_path, engine, args.num_files, args.timeout)
