@@ -48,18 +48,22 @@ CER used for CJK languages (no word boundaries). Parakeet is English-only (25 Eu
 
 | Language | Metric | Qwen3 4-bit | Qwen3 8-bit | Parakeet INT4 | Parakeet INT8 |
 |----------|--------|-------------|-------------|---------------|---------------|
-| Spanish | WER | 6.44 | 5.06 | — | — |
-| English | WER | 6.57 | 5.64 | pending | pending |
+| Spanish | WER | 6.44 | 5.06 | 5.18 | 5.18 |
+| English | WER | 6.57 | 5.64 | 9.30 | 9.30 |
 | Chinese | CER | 8.41 | 7.71 | — | — |
-| German | WER | 9.45 | 6.81 | pending | pending |
-| French | WER | 11.42 | 8.50 | pending | pending |
+| German | WER | 9.45 | 6.81 | 12.33 | 12.33 |
+| French | WER | 11.42 | 8.50 | 13.02 | 13.02 |
 | Japanese | CER | 16.11 | 8.64 | — | — |
-| Russian | WER | 16.35 | 10.52 | — | — |
+| Russian | WER | 16.35 | 10.52 | pending | pending |
 | Korean | WER | 19.95 | 6.89 | — | — |
 | Hindi | WER | 25.93 | 18.57 | — | — |
 | Arabic | WER | 33.47 | 20.31 | — | — |
 
-8-bit consistently outperforms 4-bit across all languages. Largest gains on Korean (19.95% → 6.89%, 65% reduction) and Japanese (16.11% → 8.64%, 46% reduction). European languages improve 15-30%.
+**Qwen3-ASR 8-bit** consistently outperforms 4-bit across all languages. Largest gains on Korean (19.95% → 6.89%, 65% reduction) and Japanese (16.11% → 8.64%, 46% reduction).
+
+**Parakeet INT4 = INT8** on FLEURS (identical WER for all tested languages). This contrasts with LibriSpeech where INT8 was 25% better (2.74% vs 3.68%). FLEURS has shorter utterances where quantization error has less chance to accumulate.
+
+**Qwen3 vs Parakeet**: Qwen3 8-bit is better on all languages except Spanish (5.06% vs 5.18%). Qwen3 supports 52 languages; Parakeet supports ~25 European languages (no CJK).
 
 ## Compression delta
 
