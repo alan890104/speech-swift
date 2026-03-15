@@ -4,7 +4,6 @@
 
 - **LibriSpeech test-clean** — 2620 utterances, ~5.4 hours, English read speech (standard ASR benchmark)
 - **FLEURS** — multilingual (10 languages), ~400-900 utterances per language, freely downloadable
-- **CommonVoice** — multilingual (EN, ZH, DE, ES, FR), crowd-sourced read speech (requires manual download from commonvoice.mozilla.org)
 
 ## Results
 
