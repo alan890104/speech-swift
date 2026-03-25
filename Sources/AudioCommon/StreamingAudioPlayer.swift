@@ -104,12 +104,18 @@ public final class StreamingAudioPlayer: @unchecked Sendable {
     private var playbackStarted = false
     private var generationComplete = false
     private var isFirstChunk = true
+    /// Tail of previous chunk for cross-fade at chunk boundaries
+    private var prevChunkTail: [Float] = []
+    private let crossFadeSamples = 480  // 10ms at 48kHz, 20ms at 24kHz
     private var upsampler: AVAudioConverter?
     private var preBufferSamples: Int = 0
-    private var totalWritten: Int = 0
+    public private(set) var totalWritten: Int = 0
+    /// Number of samples written for external diagnostics.
+    public var totalWrittenSamples: Int { totalWritten }
     private var totalRead: Int = 0
 
     public private(set) var isPlaying = false
+    private var playbackFinishedFired = false
 
     /// Pre-buffer duration in seconds. Playback starts after this much audio accumulates.
     /// Default 1.0s — sufficient for streaming TTS at RTF < 0.6.
@@ -200,7 +206,7 @@ public final class StreamingAudioPlayer: @unchecked Sendable {
             var sumSq: Float = 0
             for s in samples { sumSq += s * s }
             let rms = sqrt(sumSq / Float(samples.count))
-            if rms < 0.03 { return }
+            if rms < 0.02 { return }  // Drop codec warmup noise
             isFirstChunk = false
             // 5ms fade-in to prevent pop
             if let fmt = format {
@@ -209,6 +215,24 @@ public final class StreamingAudioPlayer: @unchecked Sendable {
                     output[i] *= Float(i) / Float(fadeFrames)
                 }
             }
+        }
+
+        // Cross-fade at chunk boundaries to eliminate discontinuities.
+        // Blend the tail of the previous chunk with the head of this chunk.
+        if !prevChunkTail.isEmpty && output.count >= crossFadeSamples {
+            let fadeLen = min(prevChunkTail.count, crossFadeSamples, output.count)
+            for i in 0..<fadeLen {
+                let t = Float(i) / Float(fadeLen)  // 0→1
+                output[i] = prevChunkTail[i] * (1.0 - t) + output[i] * t
+            }
+        }
+
+        // Save tail for next chunk's cross-fade
+        if output.count > crossFadeSamples {
+            prevChunkTail = Array(output[(output.count - crossFadeSamples)...])
+            output = Array(output[0..<(output.count - crossFadeSamples)])
+        } else {
+            prevChunkTail = []
         }
 
         lock.lock()
@@ -264,6 +288,15 @@ public final class StreamingAudioPlayer: @unchecked Sendable {
     /// Signal that TTS generation is complete — no more chunks will arrive.
     /// The render callback will drain remaining samples, then fire onPlaybackFinished.
     public func markGenerationComplete() {
+        // Flush any remaining cross-fade tail
+        if !prevChunkTail.isEmpty {
+            lock.lock()
+            ringBuffer?.write(prevChunkTail)
+            totalWritten += prevChunkTail.count
+            lock.unlock()
+            prevChunkTail = []
+        }
+
         lock.lock()
         generationComplete = true
         playbackStarted = true
@@ -273,6 +306,8 @@ public final class StreamingAudioPlayer: @unchecked Sendable {
 
         // No engine or nothing was written — fire immediately
         if !hasEngine || (empty && totalWritten == 0) {
+            guard !playbackFinishedFired else { return }
+            playbackFinishedFired = true
             isPlaying = false
             onPlaybackFinished?()
         }
@@ -282,8 +317,10 @@ public final class StreamingAudioPlayer: @unchecked Sendable {
     public func resetGeneration() {
         lock.lock()
         generationComplete = false
+        playbackFinishedFired = false
         playbackStarted = false
         isFirstChunk = true
+        prevChunkTail = []
         totalWritten = 0
         totalRead = 0
         ringBuffer?.reset()
@@ -370,8 +407,9 @@ public final class StreamingAudioPlayer: @unchecked Sendable {
                 self.lock.lock()
                 self.totalRead += read
                 self.lock.unlock()
-            } else if complete {
-                // Buffer empty + generation done = playback finished
+            } else if complete && !self.playbackFinishedFired {
+                // Buffer empty + generation done = playback finished (fire once)
+                self.playbackFinishedFired = true
                 dst.update(repeating: 0, count: frames)
                 DispatchQueue.main.async {
                     self.isPlaying = false
@@ -388,6 +426,46 @@ public final class StreamingAudioPlayer: @unchecked Sendable {
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: format)
         self.sourceNode = node
+    }
+
+    /// Compress long silent gaps to at most `maxSilence` samples.
+    /// TTS models produce long pauses between sentences (500ms+).
+    /// This shortens them while keeping a natural brief pause.
+    static func compressSilence(_ samples: [Float], maxSilence: Int, threshold: Float) -> [Float] {
+        guard samples.count > maxSilence else { return samples }
+
+        var result = [Float]()
+        result.reserveCapacity(samples.count)
+        var silenceRun = 0
+
+        // Process in small frames (240 samples = 10ms at 24kHz)
+        let frameSize = 240
+        var offset = 0
+
+        while offset < samples.count {
+            let end = min(offset + frameSize, samples.count)
+            let frame = samples[offset..<end]
+
+            // Compute frame RMS
+            var sumSq: Float = 0
+            for s in frame { sumSq += s * s }
+            let rms = sqrt(sumSq / Float(frame.count))
+
+            if rms < threshold {
+                silenceRun += frame.count
+                // Only keep silence up to maxSilence
+                if silenceRun <= maxSilence {
+                    result.append(contentsOf: frame)
+                }
+                // Else: drop this frame (compress the silence)
+            } else {
+                silenceRun = 0
+                result.append(contentsOf: frame)
+            }
+            offset = end
+        }
+
+        return result
     }
 }
 #endif

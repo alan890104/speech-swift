@@ -30,6 +30,8 @@ final class EchoViewModel {
     private var debugRecordBuffer: [Float] = []
     private var debugTTSBuffer: [Float] = []
     private var isRecordingDebug = false
+    private var speechStartTime: Date?
+    private var isSpeaking = false
 
     var modelsLoaded: Bool { vad != nil && asr != nil && tts != nil }
     var isPlaying: Bool { player.isPlaying }
@@ -54,11 +56,16 @@ final class EchoViewModel {
                 return model
             }.value
 
-            loadingStatus = "Loading TTS (Qwen3 CustomVoice)..."
-            appendLog("Loading Qwen3-TTS (CustomVoice)...")
+            loadingStatus = "Loading TTS (Qwen3 Base)..."
+            appendLog("Loading Qwen3-TTS (Base)...")
             tts = try await Task.detached {
-                try await Qwen3TTSModel.fromPretrained(
-                    modelId: TTSModelVariant.customVoice.rawValue)
+                let model = try await Qwen3TTSModel.fromPretrained(
+                    modelId: TTSModelVariant.base.rawValue)
+                // Larger chunks (4s) with more decoder context (20 frames)
+                // to reduce chunk boundary artifacts while streaming progressively
+                model.defaultStreamingConfig = StreamingConfig(
+                    firstChunkFrames: 50, chunkFrames: 50, decoderLeftContext: 20)
+                return model
             }.value
 
             appendLog("All models loaded.")
@@ -77,14 +84,10 @@ final class EchoViewModel {
 
         var config = PipelineConfig()
         config.mode = .echo
-        config.allowInterruptions = true
-        config.minInterruptionDuration = 2.0  // Require 2s sustained speech to interrupt (filters AEC leaks)
-        config.postPlaybackGuard = 0.6        // Let AEC settle after TTS stops before re-arming VAD
-        config.vadOnset = 0.6                 // Slightly higher than default to reject ambient noise
-        config.vadOffset = 0.4                // Clear drop to end speech
-        config.minSilenceDuration = 0.6       // Standard silence gap
-        config.eagerSTT = false               // Wait for confirmed end-of-speech before transcribing
-        config.maxResponseDuration = 15.0
+        config.allowInterruptions = false
+        config.minSilenceDuration = 1.0
+        config.eagerSTT = false
+        config.maxResponseDuration = 30.0
 
         pipeline = VoicePipeline(
             stt: asr,
@@ -97,6 +100,8 @@ final class EchoViewModel {
                 }
             }
         )
+
+        player.preBufferDuration = 0  // Start playback on first chunk
 
         player.onPlaybackFinished = { [weak self] in
             self?.playbackDidFinish()
@@ -152,19 +157,31 @@ final class EchoViewModel {
         case .sessionCreated:
             break
         case .speechStarted:
+            if pipelineState != "speech detected" {
+                appendLog("[VAD] Speech started")
+            }
             pipelineState = "speech detected"
-            appendLog("[VAD] Speech started")
+            speechStartTime = Date()
         case .speechEnded:
+            let dur = Date().timeIntervalSince(speechStartTime ?? Date())
+            if dur > 13 {
+                appendLog("[VAD] Speech ended (\(Int(dur))s — max duration reached, phrase may be cut)")
+            } else {
+                appendLog("[VAD] Speech ended")
+            }
             pipelineState = "transcribing..."
-            appendLog("[VAD] Speech ended")
         case .transcriptionCompleted(let text, let language, _):
-            pipelineState = "synthesizing..."
-            lastTranscription = text
-            lastLanguage = language ?? ""
-            let langTag = language.map { " [\($0)]" } ?? ""
-            appendLog("[STT\(langTag)] \(text)")
+            if !text.isEmpty {
+                pipelineState = "synthesizing (mic muted)..."
+                isSpeaking = true  // Mute mic — TTS is about to start
+                lastTranscription = text
+                lastLanguage = language ?? ""
+                let langTag = language.map { " [\($0)]" } ?? ""
+                appendLog("[STT\(langTag)] \(text)")
+            }
+            // Empty STT — don't mute mic, don't update UI
         case .responseCreated:
-            pipelineState = "speaking..."
+            pipelineState = "speaking (mic muted)..."
             player.resetGeneration()
         case .responseInterrupted:
             player.stop()
@@ -192,11 +209,8 @@ final class EchoViewModel {
     }
 
     func playbackDidFinish() {
-        resumeAfterResponse()
-    }
-
-    private func resumeAfterResponse() {
         guard isRunning else { return }
+        isSpeaking = false
         pipeline?.resumeListening()
         pipelineState = "listening"
         appendLog("Listening...")
@@ -308,6 +322,9 @@ final class EchoViewModel {
                 self.debugRecordBuffer.append(contentsOf: samples)
             }
 
+            // Don't push audio during TTS — prevents queued VAD events
+            // that cause stuck state after empty STT cycles
+            guard !self.isSpeaking else { return }
             self.pipeline?.pushAudio(samples)
         }
 
