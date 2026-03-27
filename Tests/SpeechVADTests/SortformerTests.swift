@@ -17,12 +17,12 @@ final class SortformerTests: XCTestCase {
         XCTAssertEqual(config.fcDModel, 512)
         XCTAssertEqual(config.maxSpeakers, 4)
         XCTAssertEqual(config.subsamplingFactor, 8)
-        XCTAssertEqual(config.onset, 0.641, accuracy: 0.001)
-        XCTAssertEqual(config.offset, 0.561, accuracy: 0.001)
-        XCTAssertEqual(config.padOnset, 0.229, accuracy: 0.001)
-        XCTAssertEqual(config.padOffset, 0.079, accuracy: 0.001)
-        XCTAssertEqual(config.minSpeechDuration, 0.296, accuracy: 0.001)
-        XCTAssertEqual(config.minSilenceDuration, 0.511, accuracy: 0.001)
+        XCTAssertEqual(config.onset, 0.56, accuracy: 0.001)
+        XCTAssertEqual(config.offset, 1.0, accuracy: 0.001)
+        XCTAssertEqual(config.padOnset, 0.063, accuracy: 0.001)
+        XCTAssertEqual(config.padOffset, 0.002, accuracy: 0.001)
+        XCTAssertEqual(config.minSpeechDuration, 0.151, accuracy: 0.001)
+        XCTAssertEqual(config.minSilenceDuration, 0.007, accuracy: 0.001)
     }
 
     func testCustomConfig() {

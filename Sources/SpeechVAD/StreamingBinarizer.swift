@@ -35,12 +35,12 @@ struct StreamingBinarizer {
 
     init(
         numSpeakers: Int,
-        onset: Float = 0.641,
-        offset: Float = 0.561,
-        padOnset: Float = 0.229,
-        padOffset: Float = 0.079,
-        minSpeechDuration: Float = 0.296,
-        minSilenceDuration: Float = 0.511,
+        onset: Float = 0.56,
+        offset: Float = 1.0,
+        padOnset: Float = 0.063,
+        padOffset: Float = 0.002,
+        minSpeechDuration: Float = 0.151,
+        minSilenceDuration: Float = 0.007,
         frameDuration: Float = 0.08
     ) {
         self.numSpeakers = numSpeakers

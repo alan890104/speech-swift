@@ -21,9 +21,9 @@ struct StreamingBinarizer {
     private let padOnset: Float, padOffset: Float
     private let minSpeechDuration: Float, minSilenceDuration: Float, frameDuration: Float
     private var states: [SpeakerState]
-    init(numSpeakers: Int, onset: Float = 0.641, offset: Float = 0.561,
-         padOnset: Float = 0.229, padOffset: Float = 0.079,
-         minSpeechDuration: Float = 0.296, minSilenceDuration: Float = 0.511, frameDuration: Float = 0.08) {
+    init(numSpeakers: Int, onset: Float = 0.56, offset: Float = 1.0,
+         padOnset: Float = 0.063, padOffset: Float = 0.002,
+         minSpeechDuration: Float = 0.151, minSilenceDuration: Float = 0.007, frameDuration: Float = 0.08) {
         self.numSpeakers = numSpeakers; self.onset = onset; self.offset = offset
         self.padOnset = padOnset; self.padOffset = padOffset
         self.minSpeechDuration = minSpeechDuration; self.minSilenceDuration = minSilenceDuration
@@ -252,17 +252,26 @@ test("testPadFiltersTooShort") {
     assert(segs.isEmpty, "Padded but still too short: got \(segs.count)")
 }
 
-test("testNeMoCallHomeDefaults") {
-    // Verify NeMo CallHome defaults are applied
-    let b = StreamingBinarizer(numSpeakers: 4)
-    // onset/offset/pad values should be NeMo CallHome defaults (can't read private fields,
-    // but we can test behavior: speech must be > 0.296s after padding to be emitted)
-    var b2 = StreamingBinarizer(numSpeakers: 1)  // NeMo defaults
+test("testNeMoDIHARD3Defaults") {
+    // Verify NeMo DIHARD3 defaults: onset=0.56, offset=1.0
+    // padOnset=0.063, padOffset=0.002, minSpeech=0.151, minSilence=0.007
+    var b = StreamingBinarizer(numSpeakers: 1)  // DIHARD3 defaults
     var probs = [Float](repeating: 0, count: 50)
-    for f in 5..<10 { probs[f] = 0.9 }  // 5 frames = 0.4s raw speech
-    // With padOnset=0.229 + padOffset=0.079: padded = 0.4 + 0.229 + 0.079 = 0.708s > 0.296s → kept
-    let segs = b2.process(probs: probs, nFrames: 50, baseTime: 0)
-    assert(segs.count == 1, "NeMo defaults should keep 0.4s speech: got \(segs.count)")
+    // 3 frames (0.24s) + padding = 0.24 + 0.063 + 0.002 = 0.305s > 0.151s → kept
+    for f in 5..<8 { probs[f] = 0.9 }
+    let segs = b.process(probs: probs, nFrames: 50, baseTime: 0)
+    assert(segs.count == 1, "DIHARD3 defaults: 0.24s speech kept, got \(segs.count)")
+    if let s = segs.first {
+        assertEq(s.startTime, 0.4 - 0.063, accuracy: 0.01, "padOnset=0.063")
+        assertEq(s.endTime, 0.64 + 0.002, accuracy: 0.01, "padOffset=0.002")
+    }
+
+    // 1 frame (0.08s) + padding = 0.08 + 0.063 + 0.002 = 0.145s < 0.151s → filtered
+    var b2 = StreamingBinarizer(numSpeakers: 1)
+    var probs2 = [Float](repeating: 0, count: 50)
+    probs2[5] = 0.9
+    let segs2 = b2.process(probs: probs2, nFrames: 50, baseTime: 0)
+    assert(segs2.isEmpty, "DIHARD3: 0.145s < 0.151s → filtered, got \(segs2.count)")
 }
 
 // ── Speaker ID Tests (raw channel index, no compaction) ──
@@ -324,44 +333,38 @@ test("testMelExtractorEmptyInput") {
     // If we got here, the guard would return [] without accessing empty[0]
 }
 
-test("testNeMoDefaultsUsedByDefault") {
-    // Fix E3: verify SortformerConfig defaults are NeMo CallHome values
-    // These are the values that both batch and streaming should use
-    let onset: Float = 0.641
-    let offset: Float = 0.561
-    let padOnset: Float = 0.229
-    let padOffset: Float = 0.079
-    let minSpeech: Float = 0.296
-    let minSilence: Float = 0.511
+test("testDIHARD3DefaultsUsedByDefault") {
+    // Fix E3: verify SortformerConfig defaults are NeMo DIHARD3 values
+    let padOnset: Float = 0.063
+    let padOffset: Float = 0.002
 
-    // StreamingBinarizer with no arguments should use NeMo defaults
+    // StreamingBinarizer with no arguments should use DIHARD3 defaults
     var b = StreamingBinarizer(numSpeakers: 1)
-    // Test behavior: 5 frames of speech (0.4s raw) + padding should pass minSpeech filter
-    // Raw duration = 0.4s. Padded = 0.4 + 0.229 + 0.079 = 0.708s > 0.296s → kept
+    // 5 frames (0.4s) + padding = 0.4 + 0.063 + 0.002 = 0.465s > 0.151s → kept
     var probs = [Float](repeating: 0, count: 50)
-    for f in 5..<10 { probs[f] = 0.9 }  // 5 frames at 0.08s = 0.4s
+    for f in 5..<10 { probs[f] = 0.9 }
     let segs = b.process(probs: probs, nFrames: 50, baseTime: 0)
-    assert(segs.count == 1, "NeMo defaults: 0.4s speech should be kept after padding, got \(segs.count)")
+    assert(segs.count == 1, "DIHARD3 defaults: 0.4s speech kept, got \(segs.count)")
     if let s = segs.first {
-        // Padded start: 0.4 - 0.229 = 0.171
-        assertEq(s.startTime, 0.4 - padOnset, accuracy: 0.01, "NeMo padOnset applied")
-        // Padded end: 0.8 + 0.079 = 0.879
-        assertEq(s.endTime, 0.8 + padOffset, accuracy: 0.01, "NeMo padOffset applied")
+        assertEq(s.startTime, 0.4 - padOnset, accuracy: 0.01, "padOnset=0.063")
+        assertEq(s.endTime, 0.8 + padOffset, accuracy: 0.01, "padOffset=0.002")
     }
 
-    // 2 frames of speech (0.16s raw) + padding = 0.16 + 0.229 + 0.079 = 0.468s > 0.296 → kept
+    // 2 frames (0.16s): with offset=1.0, prob=0.9 < 1.0 triggers pendingSilence
+    // between frames, splitting the segment to just 0.08s raw.
+    // With padding: 0.08 + 0.063 + 0.002 = 0.145s < 0.151s → filtered
     var b2 = StreamingBinarizer(numSpeakers: 1)
     var probs2 = [Float](repeating: 0, count: 50)
     for f in 5..<7 { probs2[f] = 0.9 }
     let segs2 = b2.process(probs: probs2, nFrames: 50, baseTime: 0)
-    assert(segs2.count == 1, "NeMo defaults: 0.16s + padding = 0.468s > 0.296s → kept, got \(segs2.count)")
+    assert(segs2.isEmpty, "DIHARD3 offset=1.0: 2-frame speech split → filtered, got \(segs2.count)")
 
-    // 1 frame of speech (0.08s raw) + padding = 0.08 + 0.229 + 0.079 = 0.388s > 0.296 → kept
+    // 1 frame (0.08s) + padding = 0.08 + 0.063 + 0.002 = 0.145s < 0.151s → filtered
     var b3 = StreamingBinarizer(numSpeakers: 1)
     var probs3 = [Float](repeating: 0, count: 50)
     probs3[5] = 0.9
     let segs3 = b3.process(probs: probs3, nFrames: 50, baseTime: 0)
-    assert(segs3.count == 1, "NeMo defaults: 0.08s + padding = 0.388s > 0.296s → kept, got \(segs3.count)")
+    assert(segs3.isEmpty, "DIHARD3: 0.08s + padding = 0.145s < 0.151s → filtered, got \(segs3.count)")
 }
 
 test("testProgressHandlerCalled") {

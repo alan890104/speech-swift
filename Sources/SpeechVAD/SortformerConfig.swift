@@ -79,11 +79,11 @@ public struct SortformerConfig: Sendable {
 
     // MARK: - Presets
 
-    /// Default streaming configuration matching the NeMo checkpoint.
-    /// Default configuration with NeMo CallHome-optimized post-processing thresholds.
+    /// Default streaming configuration with NeMo DIHARD3-optimized post-processing.
     ///
+    /// AOSC parameters match NeMo `streaming_sortformer_diarizer_4spk-v2.yaml`.
     /// Post-processing parameters from:
-    /// `diar_streaming_sortformer_4spk-v2_callhome-part1.yaml`
+    /// `diar_streaming_sortformer_4spk-v2_dihard3-dev.yaml` (multi-language, multi-scenario).
     public static let `default` = SortformerConfig(
         nMels: 128,
         nFFT: 400,
@@ -105,12 +105,12 @@ public struct SortformerConfig: Sendable {
         silThreshold: 0.2,
         scoresBoostLatest: 0.05,
         spkcacheUpdatePeriod: 188,
-        onset: 0.641,
-        offset: 0.561,
-        padOnset: 0.229,
-        padOffset: 0.079,
-        minSpeechDuration: 0.296,
-        minSilenceDuration: 0.511
+        onset: 0.56,
+        offset: 1.0,
+        padOnset: 0.063,
+        padOffset: 0.002,
+        minSpeechDuration: 0.151,
+        minSilenceDuration: 0.007
     )
 
     public init(
@@ -134,12 +134,12 @@ public struct SortformerConfig: Sendable {
         silThreshold: Float = 0.2,
         scoresBoostLatest: Float = 0.05,
         spkcacheUpdatePeriod: Int = 188,
-        onset: Float = 0.641,
-        offset: Float = 0.561,
-        padOnset: Float = 0.229,
-        padOffset: Float = 0.079,
-        minSpeechDuration: Float = 0.296,
-        minSilenceDuration: Float = 0.511
+        onset: Float = 0.56,
+        offset: Float = 1.0,
+        padOnset: Float = 0.063,
+        padOffset: Float = 0.002,
+        minSpeechDuration: Float = 0.151,
+        minSilenceDuration: Float = 0.007
     ) {
         self.nMels = nMels
         self.nFFT = nFFT
