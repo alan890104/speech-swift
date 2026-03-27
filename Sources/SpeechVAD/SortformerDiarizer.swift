@@ -158,6 +158,7 @@ public final class SortformerDiarizer {
         var endFeat = 0
 
         while endFeat < totalMelFrames {
+            if Task.isCancelled { break }
             let leftOffset = min(leftCtx * subFactor, sttFeat)
             endFeat = min(sttFeat + coreMelFrames, totalMelFrames)
             let rightOffset = min(rightCtx * subFactor, totalMelFrames - endFeat)

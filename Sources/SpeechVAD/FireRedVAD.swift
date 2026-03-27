@@ -132,6 +132,7 @@ public final class FireRedVADModel {
             var allProbs = [Float]()
             var offset = 0
             while offset < numFrames {
+                if Task.isCancelled { break }
                 let chunkFrames = min(maxFrames, numFrames - offset)
                 let chunkStart = offset * 80
                 let chunkEnd = chunkStart + chunkFrames * 80
@@ -186,6 +187,7 @@ public final class FireRedVADModel {
             var allProbs = [Float]()
             var offset = 0
             while offset < numFrames {
+                if Task.isCancelled { break }
                 let chunkFrames = min(maxFrames, numFrames - offset)
                 let chunkStart = offset * 80
                 let chunkEnd = chunkStart + chunkFrames * 80

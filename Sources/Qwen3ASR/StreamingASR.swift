@@ -102,6 +102,7 @@ public class StreamingASR {
 
                 var offset = 0
                 while offset < samples.count {
+                    if Task.isCancelled { break }
                     let end = min(offset + chunkSize, samples.count)
                     let chunk = Array(samples[offset..<end])
                     let events = processor.process(samples: chunk)

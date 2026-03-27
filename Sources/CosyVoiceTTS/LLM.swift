@@ -491,6 +491,7 @@ public class CosyVoiceLLM: Module {
 
         // Autoregressive generation loop (uses compiled step when available)
         for step in 0..<(maxTokens - 1) {
+            if Task.isCancelled { break }
             // Embed the last generated speech token
             let tokenEmbed = speechEmbedding(
                 MLXArray([currentToken]).expandedDimensions(axis: 0))  // [1, 1, hidden]

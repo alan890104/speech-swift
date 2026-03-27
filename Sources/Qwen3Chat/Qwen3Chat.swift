@@ -262,6 +262,7 @@ public final class Qwen3ChatModel: @unchecked Sendable {
         let thinkBudget = 100  // extra tokens for <think>...</think>
 
         for _ in 0..<(sampling.maxTokens + thinkBudget) {
+            if Task.isCancelled { break }
             let nextToken = generator.sample(
                 logits: logits,
                 config: sampling,
@@ -320,6 +321,7 @@ public final class Qwen3ChatModel: @unchecked Sendable {
                     // Decode loop — skip thinking block tokens
                     var inThinking = false
                     for _ in 0..<sampling.maxTokens {
+                        if Task.isCancelled { break }
                         let nextToken = self.generator.sample(
                             logits: logits,
                             config: sampling,
@@ -400,6 +402,7 @@ public final class Qwen3ChatModel: @unchecked Sendable {
         // Decode response
         var generatedTokens: [Int] = []
         for _ in 0..<sampling.maxTokens {
+            if Task.isCancelled { break }
             let nextToken = generator.sample(
                 logits: logits,
                 config: sampling,
@@ -466,6 +469,7 @@ public final class Qwen3ChatModel: @unchecked Sendable {
 
                     var inThinking = false
                     for _ in 0..<sampling.maxTokens {
+                        if Task.isCancelled { break }
                         let nextToken = self.generator.sample(
                             logits: logits,
                             config: sampling,

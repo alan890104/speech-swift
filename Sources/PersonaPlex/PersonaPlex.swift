@@ -737,6 +737,7 @@ public final class PersonaPlexModel: Module {
                     var pendingTextTokens: [Int32] = []
 
                     for step in promptLen..<(prefillLen + maxSteps) {
+                        if Task.isCancelled { break }
                         let readIdx = step - 1
                         let textTok = tokenCache[0][readIdx]
                         let textTokenArr = MLXArray([textTok]).reshaped([1, 1])

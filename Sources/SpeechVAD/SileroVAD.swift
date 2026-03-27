@@ -184,6 +184,7 @@ public final class SileroVADModel {
         var offset = 0
 
         while offset + Self.chunkSize <= samples.count {
+            if Task.isCancelled { break }
             let chunk = Array(samples[offset ..< (offset + Self.chunkSize)])
             probs.append(processChunk(chunk))
             offset += Self.chunkSize

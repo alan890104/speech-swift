@@ -415,6 +415,7 @@ public class Qwen3TTSModel {
 
         // Autoregressive generation loop
         for iterIdx in 1..<safeMaxTokens {
+            if Task.isCancelled { break }
             // Text side
             let textEmbed: MLXArray
             let trailingLen = trailingTextHidden.dim(1)
@@ -829,6 +830,7 @@ public class Qwen3TTSModel {
 
         // Autoregressive generation
         for iterIdx in 1..<safeMaxTokens {
+            if Task.isCancelled { break }
             // Text side: next trailing text embed or pad (same index for all items since pre-padded)
             let textEmbed: MLXArray
             if trailingIdx < maxTrailingLen {
@@ -1438,6 +1440,7 @@ public class Qwen3TTSModel {
 
         // Autoregressive generation
         for iterIdx in 1..<safeMaxTokens {
+            if Task.isCancelled { break }
             // Text side: next trailing text embed or tts_pad
             let textEmbed: MLXArray
             let trailingLen = trailingTextHidden.dim(1)
