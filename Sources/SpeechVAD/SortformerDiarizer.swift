@@ -38,7 +38,7 @@ public final class SortformerDiarizer {
     private var fifo: [Float]
     /// Number of valid frames in FIFO
     private var fifoLength: Int = 0
-    init(model: SortformerCoreMLModel, config: SortformerConfig = .default) {
+    public init(model: SortformerCoreMLModel, config: SortformerConfig = .default) {
         self.model = model
         self.config = config
         self.melExtractor = SortformerMelExtractor(config: config)

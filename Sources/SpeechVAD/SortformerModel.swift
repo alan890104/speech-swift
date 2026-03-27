@@ -8,7 +8,7 @@ import AudioCommon
 /// Runs on Neural Engine via CoreML. The model takes a chunk of mel features
 /// plus streaming state buffers (spkcache, fifo) and outputs per-frame
 /// speaker predictions for up to 4 speakers.
-final class SortformerCoreMLModel {
+public final class SortformerCoreMLModel {
 
     private let model: MLModel
     let config: SortformerConfig
@@ -20,7 +20,7 @@ final class SortformerCoreMLModel {
     private let fifoFrames: Int
     private let featureDim: Int
 
-    init(model: MLModel, config: SortformerConfig = .default) {
+    public init(model: MLModel, config: SortformerConfig = .default) {
         self.model = model
         self.config = config
         self.spkcacheFrames = config.spkcacheLen
