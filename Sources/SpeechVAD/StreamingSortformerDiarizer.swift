@@ -226,6 +226,51 @@ public final class StreamingSortformerDiarizer {
         return segments
     }
 
+    /// Run diarization on complete audio with constant memory.
+    ///
+    /// Same interface as `SortformerDiarizer.diarize()` but uses streaming
+    /// internally — memory stays at ~550 KB regardless of audio length.
+    /// Output is identical in format: sorted segments with compacted speaker IDs.
+    ///
+    /// - Parameters:
+    ///   - audio: Complete PCM Float32 audio
+    ///   - sampleRate: Sample rate of the input audio
+    ///   - chunkSamples: Audio samples per processing chunk (default: 1 second)
+    /// - Returns: Diarization result with speaker-labeled segments
+    public func diarize(
+        audio: [Float],
+        sampleRate: Int,
+        chunkSamples: Int = 16000
+    ) -> DiarizationResult {
+        resetState()
+
+        let samples = (sampleRate == config.sampleRate)
+            ? audio
+            : DiarizationHelpers.resample(audio, from: sampleRate, to: config.sampleRate)
+
+        var allSegments = [DiarizedSegment]()
+
+        var offset = 0
+        while offset < samples.count {
+            let end = min(offset + chunkSamples, samples.count)
+            let chunk = Array(samples[offset..<end])
+            allSegments.append(contentsOf: process(samples: chunk))
+            offset = end
+        }
+        allSegments.append(contentsOf: flush())
+
+        // Post-process: sort, merge, compact — same as batch SortformerDiarizer
+        allSegments.sort { $0.startTime < $1.startTime }
+        let merged = DiarizationHelpers.mergeSegments(allSegments, minSilence: config.minSilenceDuration)
+        let compacted = DiarizationHelpers.compactSpeakerIds(merged)
+
+        let usedSpeakers = Set(compacted.map(\.speakerId))
+        return DiarizationResult(
+            segments: compacted,
+            numSpeakers: usedSpeakers.count,
+            speakerEmbeddings: [])
+    }
+
     /// Reset all state for a new audio session.
     public func resetState() {
         isFlushing = false
