@@ -124,7 +124,8 @@ public final class SortformerDiarizer {
     public func diarize(
         audio: [Float],
         sampleRate: Int,
-        config: DiarizationConfig = .default
+        config: DiarizationConfig = .default,
+        progressHandler: ((Double) -> Void)? = nil
     ) -> DiarizationResult {
         let samples = DiarizationHelpers.resample(audio, from: sampleRate, to: self.config.sampleRate)
 
@@ -216,6 +217,7 @@ public final class SortformerDiarizer {
             }
 
             sttFeat = endFeat
+            progressHandler?(Double(endFeat) / Double(totalMelFrames))
         }
 
         guard !allChunkProbs.isEmpty else {
