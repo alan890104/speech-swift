@@ -32,11 +32,6 @@ struct StreamingBinarizer {
 
     /// Per-speaker state machines.
     private var states: [SpeakerState]
-    /// Maps raw model channel index → compacted speaker ID (by first appearance).
-    /// Channel 2 activates first → speaker 0, channel 0 next → speaker 1, etc.
-    private var channelToSpeaker: [Int: Int]
-    /// Next speaker ID to assign
-    private var nextSpeakerId: Int
 
     init(
         numSpeakers: Int,
@@ -57,17 +52,6 @@ struct StreamingBinarizer {
         self.minSilenceDuration = minSilenceDuration
         self.frameDuration = frameDuration
         self.states = [SpeakerState](repeating: .idle, count: numSpeakers)
-        self.channelToSpeaker = [:]
-        self.nextSpeakerId = 0
-    }
-
-    /// Get or assign a compacted speaker ID for a raw model channel.
-    private mutating func speakerId(forChannel channel: Int) -> Int {
-        if let id = channelToSpeaker[channel] { return id }
-        let id = nextSpeakerId
-        channelToSpeaker[channel] = id
-        nextSpeakerId += 1
-        return id
     }
 
     /// Process new prediction frames and return finalized segments.
@@ -94,7 +78,6 @@ struct StreamingBinarizer {
                 case .idle:
                     if prob >= onset {
                         states[s] = .active(startTime: time)
-                        _ = speakerId(forChannel: s)  // register on first activation
                     }
 
                 case .active(let startTime):
@@ -146,13 +129,14 @@ struct StreamingBinarizer {
         return segments
     }
 
-    /// Which speakers are currently active (speaking right now), using compacted IDs.
+    /// Which speakers are currently active (speaking right now).
+    /// Returns raw model channel indices (Sortformer channels are arrival-ordered).
     var activeSpeakers: [Int] {
         var result = [Int]()
         for s in 0..<numSpeakers {
             switch states[s] {
             case .active, .pendingSilence:
-                result.append(channelToSpeaker[s] ?? s)
+                result.append(s)
             case .idle:
                 break
             }
@@ -160,20 +144,18 @@ struct StreamingBinarizer {
         return result
     }
 
-    /// Apply padOnset/padOffset and map channel to compacted speaker ID.
+    /// Apply padOnset/padOffset to a raw segment and filter by minSpeechDuration.
+    /// Uses raw model channel index as speaker ID (Sortformer channels are arrival-ordered).
     private func padded(_ start: Float, _ end: Float, channel: Int) -> DiarizedSegment? {
         let paddedStart = max(0, start - padOnset)
         let paddedEnd = end + padOffset
         let duration = paddedEnd - paddedStart
         guard duration >= minSpeechDuration else { return nil }
-        let spkId = channelToSpeaker[channel] ?? channel
-        return DiarizedSegment(startTime: paddedStart, endTime: paddedEnd, speakerId: spkId)
+        return DiarizedSegment(startTime: paddedStart, endTime: paddedEnd, speakerId: channel)
     }
 
     /// Reset all state for a new audio session.
     mutating func reset() {
         states = [SpeakerState](repeating: .idle, count: numSpeakers)
-        channelToSpeaker = [:]
-        nextSpeakerId = 0
     }
 }

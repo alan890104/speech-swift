@@ -21,9 +21,6 @@ struct StreamingBinarizer {
     private let padOnset: Float, padOffset: Float
     private let minSpeechDuration: Float, minSilenceDuration: Float, frameDuration: Float
     private var states: [SpeakerState]
-    private var channelToSpeaker: [Int: Int]
-    private var nextSpeakerId: Int
-
     init(numSpeakers: Int, onset: Float = 0.641, offset: Float = 0.561,
          padOnset: Float = 0.229, padOffset: Float = 0.079,
          minSpeechDuration: Float = 0.296, minSilenceDuration: Float = 0.511, frameDuration: Float = 0.08) {
@@ -32,18 +29,12 @@ struct StreamingBinarizer {
         self.minSpeechDuration = minSpeechDuration; self.minSilenceDuration = minSilenceDuration
         self.frameDuration = frameDuration
         self.states = [SpeakerState](repeating: .idle, count: numSpeakers)
-        self.channelToSpeaker = [:]; self.nextSpeakerId = 0
-    }
-
-    private mutating func speakerId(forChannel ch: Int) -> Int {
-        if let id = channelToSpeaker[ch] { return id }
-        let id = nextSpeakerId; channelToSpeaker[ch] = id; nextSpeakerId += 1; return id
     }
 
     private func padded(_ start: Float, _ end: Float, channel: Int) -> DiarizedSegment? {
         let ps = max(0, start - padOnset), pe = end + padOffset
         guard pe - ps >= minSpeechDuration else { return nil }
-        return DiarizedSegment(startTime: ps, endTime: pe, speakerId: channelToSpeaker[channel] ?? channel)
+        return DiarizedSegment(startTime: ps, endTime: pe, speakerId: channel)
     }
 
     mutating func process(probs: [Float], nFrames: Int, baseTime: Float) -> [DiarizedSegment] {
@@ -54,7 +45,7 @@ struct StreamingBinarizer {
                 let prob = probs[f * numSpeakers + s]
                 switch states[s] {
                 case .idle:
-                    if prob >= onset { states[s] = .active(startTime: time); _ = speakerId(forChannel: s) }
+                    if prob >= onset { states[s] = .active(startTime: time) }
                 case .active(let st):
                     if prob < offset { states[s] = .pendingSilence(speechStart: st, silenceStart: time) }
                 case .pendingSilence(let sp, let si):
@@ -87,12 +78,11 @@ struct StreamingBinarizer {
     var activeSpeakers: [Int] {
         (0..<numSpeakers).filter { s in
             if case .idle = states[s] { return false }; return true
-        }.map { channelToSpeaker[$0] ?? $0 }
+        }
     }
 
     mutating func reset() {
         states = [SpeakerState](repeating: .idle, count: numSpeakers)
-        channelToSpeaker = [:]; nextSpeakerId = 0
     }
 }
 
@@ -182,13 +172,14 @@ test("testBinarizerStreaming") {
 
 test("testBinarizerActiveSpeakers") {
     var binarizer = noPadBinarizer(numSpeakers: 4, minSpeech: 0.1, minSilence: 0.1)
-    // channels 0 and 2 active → compacted to speakers 0 and 1
+    // Channels 0 and 2 active — returns raw channel indices
     let probs: [Float] = [0.9, 0.1, 0.8, 0.1]
     _ = binarizer.process(probs: probs, nFrames: 1, baseTime: 0)
     let active = binarizer.activeSpeakers
-    assert(active.contains(0), "speaker 0 active (channel 0)")
-    assert(active.contains(1), "speaker 1 active (channel 2)")
-    assert(active.count == 2, "exactly 2 active, got \(active)")
+    assert(active.contains(0), "channel 0 active")
+    assert(!active.contains(1), "channel 1 not active")
+    assert(active.contains(2), "channel 2 active")
+    assert(!active.contains(3), "channel 3 not active")
 }
 
 test("testBinarizerFlush") {
@@ -274,66 +265,32 @@ test("testNeMoCallHomeDefaults") {
     assert(segs.count == 1, "NeMo defaults should keep 0.4s speech: got \(segs.count)")
 }
 
-// ── Speaker ID Compaction Tests ──
+// ── Speaker ID Tests (raw channel index, no compaction) ──
 
-test("testSpeakerIdCompaction") {
-    // Channel 2 speaks first, then channel 0 → IDs should be 0, 1 (by appearance)
+test("testSpeakerIdIsRawChannel") {
+    // Sortformer channels ARE arrival-ordered, so raw channel = speaker ID
     var binarizer = noPadBinarizer(numSpeakers: 4, minSpeech: 0.1, minSilence: 0.1)
     var probs = [Float](repeating: 0, count: 40 * 4)
-    // Channel 2 active first: frames 0-8
+    // Channel 2 active: frames 0-8
     for f in 0..<8 { probs[f * 4 + 2] = 0.9 }
-    // Channel 0 active second: frames 15-23
+    // Channel 0 active: frames 15-23
     for f in 15..<23 { probs[f * 4 + 0] = 0.9 }
 
     let segs = binarizer.process(probs: probs, nFrames: 40, baseTime: 0)
     assert(segs.count == 2, "Expected 2 segments, got \(segs.count)")
     if segs.count == 2 {
-        assert(segs[0].speakerId == 0, "Channel 2 first → speaker 0, got \(segs[0].speakerId)")
-        assert(segs[1].speakerId == 1, "Channel 0 second → speaker 1, got \(segs[1].speakerId)")
+        // Raw channel indices, not compacted
+        assert(segs[0].speakerId == 2, "first segment = channel 2, got \(segs[0].speakerId)")
+        assert(segs[1].speakerId == 0, "second segment = channel 0, got \(segs[1].speakerId)")
     }
 }
 
-test("testSpeakerIdCompactionActiveSpeakers") {
-    // Channel 3 speaks → activeSpeakers should show 0 (compacted), not 3
+test("testActiveSpeakersRawChannel") {
     var binarizer = noPadBinarizer(numSpeakers: 4, minSpeech: 0.1, minSilence: 0.1)
     var probs = [Float](repeating: 0, count: 4)
     probs[3] = 0.9  // only channel 3
     _ = binarizer.process(probs: probs, nFrames: 1, baseTime: 0)
-    let active = binarizer.activeSpeakers
-    assert(active == [0], "Channel 3 first active → compacted to speaker 0, got \(active)")
-}
-
-test("testSpeakerIdStableAcrossCalls") {
-    // Once assigned, a channel keeps its speaker ID across process() calls
-    var binarizer = noPadBinarizer(numSpeakers: 4, minSpeech: 0.1, minSilence: 0.1)
-    // Call 1: channel 1 speaks
-    var p1 = [Float](repeating: 0, count: 4)
-    p1[1] = 0.9
-    _ = binarizer.process(probs: p1, nFrames: 1, baseTime: 0)
-    // Call 2: channel 3 speaks
-    var p2 = [Float](repeating: 0, count: 4)
-    p2[3] = 0.9
-    _ = binarizer.process(probs: p2, nFrames: 1, baseTime: 0.08)
-    // Call 3: channel 1 speaks again
-    _ = binarizer.process(probs: p1, nFrames: 1, baseTime: 0.16)
-    let active = binarizer.activeSpeakers
-    // channel 1 → speaker 0 (first), channel 3 → speaker 1 (second)
-    assert(active.contains(0), "channel 1 should still be speaker 0")
-    assert(active.contains(1), "channel 3 should still be speaker 1")
-}
-
-test("testResetClearsCompaction") {
-    var binarizer = noPadBinarizer(numSpeakers: 4, minSpeech: 0.1, minSilence: 0.1)
-    var probs = [Float](repeating: 0, count: 4)
-    probs[2] = 0.9
-    _ = binarizer.process(probs: probs, nFrames: 1, baseTime: 0)
-    assert(binarizer.activeSpeakers == [0], "channel 2 → speaker 0")
-    binarizer.reset()
-    // After reset, channel 0 should get speaker 0
-    probs = [Float](repeating: 0, count: 4)
-    probs[0] = 0.9
-    _ = binarizer.process(probs: probs, nFrames: 1, baseTime: 0)
-    assert(binarizer.activeSpeakers == [0], "after reset, channel 0 → speaker 0")
+    assert(binarizer.activeSpeakers == [3], "raw channel 3, got \(binarizer.activeSpeakers)")
 }
 
 // ── Incremental Mel Extraction Test ──
