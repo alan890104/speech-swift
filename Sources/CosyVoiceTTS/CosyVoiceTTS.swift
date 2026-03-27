@@ -78,10 +78,11 @@ public final class CosyVoiceTTSModel {
                     "llm.safetensors", "flow.safetensors", "hifigan.safetensors",
                     "vocab.json", "merges.txt", "tokenizer_config.json",
                 ],
+                progressHandler: { progress in
+                    progressHandler?(progress * 0.5, "Downloading...")
+                },
                 useOfflineMode: useOfflineMode
-            ) { progress in
-                progressHandler?(progress * 0.5, "Downloading...")
-            }
+            )
         }
 
         // Load weights

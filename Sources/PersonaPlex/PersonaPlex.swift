@@ -1533,10 +1533,11 @@ public final class PersonaPlexModel: Module {
             modelId: modelId,
             to: modelDir,
             additionalFiles: weightFiles,
+            progressHandler: { progress in
+                progressHandler?(0.05 + progress * 0.5, "Downloading...")
+            },
             useOfflineMode: useOfflineMode
-        ) { progress in
-            progressHandler?(0.05 + progress * 0.5, "Downloading...")
-        }
+        )
 
         // Read config.json to detect quantization settings
         var cfg = PersonaPlexConfig.default

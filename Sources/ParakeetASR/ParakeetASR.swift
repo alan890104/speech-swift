@@ -200,10 +200,11 @@ public class ParakeetASRModel {
                     "vocab.json",
                     "config.json",
                 ],
+                progressHandler: { fraction in
+                    progressHandler?(fraction * 0.7, "Downloading model...")
+                },
                 useOfflineMode: useOfflineMode
-            ) { fraction in
-                progressHandler?(fraction * 0.7, "Downloading model...")
-            }
+            )
         } catch {
             throw AudioModelError.modelLoadFailed(
                 modelId: modelId, reason: "Download failed", underlying: error)

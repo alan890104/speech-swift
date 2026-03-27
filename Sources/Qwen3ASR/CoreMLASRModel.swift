@@ -38,20 +38,22 @@ public class CoreMLASRModel {
         let enc = try await CoreMLASREncoder.fromPretrained(
             modelId: encoderModelId,
             computeUnits: computeUnits,
+            progressHandler: { p, msg in
+                progressHandler?(p * 0.3, msg)
+            },
             useOfflineMode: useOfflineMode
-        ) { p, msg in
-            progressHandler?(p * 0.3, msg)
-        }
+        )
 
         // Download decoder (30-80%)
         progressHandler?(0.3, "Loading CoreML decoder...")
         let dec = try await CoreMLTextDecoder.fromPretrained(
             modelId: decoderModelId,
             computeUnits: computeUnits,
+            progressHandler: { p, msg in
+                progressHandler?(0.3 + p * 0.5, msg)
+            },
             useOfflineMode: useOfflineMode
-        ) { p, msg in
-            progressHandler?(0.3 + p * 0.5, msg)
-        }
+        )
 
         // Download tokenizer (80-90%)
         progressHandler?(0.8, "Loading tokenizer...")

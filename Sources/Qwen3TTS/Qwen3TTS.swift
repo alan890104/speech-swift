@@ -1596,8 +1596,9 @@ public extension Qwen3TTSModel {
                 additionalFiles: ["vocab.json", "merges.txt", "tokenizer_config.json"],
                 progressHandler: { progress in
                     progressHandler?(0.1 + progress * 0.3, "Downloading TTS model...")
+                },
                 useOfflineMode: useOfflineMode
-                })
+            )
         }
 
         // Download tokenizer/codec weights
@@ -1609,8 +1610,9 @@ public extension Qwen3TTSModel {
                 to: tokenizerCacheDir,
                 progressHandler: { progress in
                     progressHandler?(0.4 + progress * 0.2, "Downloading speech tokenizer...")
+                },
                 useOfflineMode: useOfflineMode
-                })
+            )
         }
 
         // Parse config.json for speaker config and quantization fallback

@@ -56,10 +56,11 @@ public class CoreMLASREncoder {
             modelId: modelId,
             to: cacheDir,
             additionalFiles: ["encoder.mlmodelc/**", "config.json"],
+            progressHandler: { fraction in
+                progressHandler?(fraction * 0.8, "Downloading CoreML encoder...")
+            },
             useOfflineMode: useOfflineMode
-        ) { fraction in
-            progressHandler?(fraction * 0.8, "Downloading CoreML encoder...")
-        }
+        )
 
         progressHandler?(0.9, "Loading CoreML encoder...")
         let encoder = try load(from: cacheDir, computeUnits: computeUnits)

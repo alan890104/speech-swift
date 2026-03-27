@@ -109,10 +109,11 @@ public class CoreMLTextDecoder {
                 "decoder.mlmodelc/**",
                 "config.json",
             ],
+            progressHandler: { fraction in
+                progressHandler?(fraction * 0.8, "Downloading CoreML decoder...")
+            },
             useOfflineMode: useOfflineMode
-        ) { fraction in
-            progressHandler?(fraction * 0.8, "Downloading CoreML decoder...")
-        }
+        )
 
         progressHandler?(0.9, "Loading CoreML decoder...")
         let decoder = try load(from: cacheDir, computeUnits: computeUnits)
