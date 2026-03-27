@@ -120,8 +120,8 @@ public final class StreamingSortformerDiarizer {
             offset: config.offset,
             padOnset: config.padOnset,
             padOffset: config.padOffset,
-            minSpeechDuration: config.minSpeechDuration,
-            minSilenceDuration: config.minSilenceDuration,
+            minDurationOn: config.minSilenceDuration,
+            minDurationOff: config.minSpeechDuration,
             frameDuration: frameDuration)
     }
 
@@ -174,34 +174,33 @@ public final class StreamingSortformerDiarizer {
 
     // MARK: - Public API
 
-    /// Push audio samples and get finalized diarization segments back.
+    /// Push audio samples for processing.
     ///
     /// Samples can be any length — internally buffered to model chunk size.
-    /// Returned segments are finalized (the speaker stopped talking for at least
-    /// `minSilenceDuration` seconds).
+    /// Segments accumulate internally; call `flush()` to get filtered output.
     ///
     /// - Parameter samples: PCM Float32 audio at 16kHz
-    /// - Returns: Zero or more finalized segments
-    public func process(samples: [Float]) -> [DiarizedSegment] {
+    public func process(samples: [Float]) {
         precondition(!isFlushing,
             "process() called after flush(). Call resetState() before processing new audio.")
 
         // Extract new mel frames incrementally
         let newMel = melExtractor.extractIncremental(newSamples: samples)
         let newMelFrames = newMel.count / config.nMels
-        guard newMelFrames > 0 else { return [] }
+        guard newMelFrames > 0 else { return }
 
         melBuffer.append(contentsOf: newMel)
         melFrameCount += newMelFrames
         totalMelExtracted += newMelFrames
 
         // Process as many complete chunks as possible
-        return processAvailableChunks()
+        processAvailableChunks()
     }
 
-    /// End of audio stream. Process remaining buffered audio, close open segments.
+    /// End of audio stream. Processes remaining audio, applies NeMo filtering,
+    /// and returns all finalized segments.
     ///
-    /// - Returns: Any remaining segments (including currently-active speakers)
+    /// - Returns: Filtered, merged segments sorted by start time
     public func flush() -> [DiarizedSegment] {
         isFlushing = true
 
@@ -214,19 +213,17 @@ public final class StreamingSortformerDiarizer {
             totalMelExtracted += finalFrames
         }
 
-        // Process any remaining chunks (may be partial — zero-padded)
-        var segments = processAvailableChunks()
+        // Process any remaining chunks
+        processAvailableChunks()
 
         // Handle the very last partial chunk if any mel frames remain
         if melFrameCount > 0 {
-            segments.append(contentsOf: processPartialChunk())
+            processPartialChunk()
         }
 
-        // Flush binarizer — close any open segments
+        // Flush binarizer — applies NeMo filtering (short speech removal + gap filling)
         let endTime = Float(totalDiarFrames) * frameDuration
-        segments.append(contentsOf: binarizer.flush(endTime: endTime))
-
-        return segments
+        return binarizer.flush(endTime: endTime)
     }
 
     /// Run diarization on complete audio with constant memory.
@@ -252,22 +249,17 @@ public final class StreamingSortformerDiarizer {
             ? audio
             : DiarizationHelpers.resample(audio, from: sampleRate, to: config.sampleRate)
 
-        var allSegments = [DiarizedSegment]()
-
         var offset = 0
         while offset < samples.count {
             let end = min(offset + chunkSamples, samples.count)
             let chunk = Array(samples[offset..<end])
-            allSegments.append(contentsOf: process(samples: chunk))
+            process(samples: chunk)
             offset = end
             progressHandler?(Double(offset) / Double(samples.count))
         }
-        allSegments.append(contentsOf: flush())
-
-        // Post-process: sort, merge, compact — same as batch SortformerDiarizer
-        allSegments.sort { $0.startTime < $1.startTime }
-        let merged = DiarizationHelpers.mergeSegments(allSegments, minSilence: config.minSilenceDuration)
-        let compacted = DiarizationHelpers.compactSpeakerIds(merged)
+        // flush() returns NeMo-filtered segments (short speech removed, gaps filled)
+        let allSegments = flush()
+        let compacted = DiarizationHelpers.compactSpeakerIds(allSegments)
 
         let usedSpeakers = Set(compacted.map(\.speakerId))
         return DiarizationResult(
@@ -312,8 +304,8 @@ public final class StreamingSortformerDiarizer {
     private var isFlushing: Bool = false
 
     /// Process all complete chunks available in the mel buffer.
+    @discardableResult
     private func processAvailableChunks() -> [DiarizedSegment] {
-        var allSegments = [DiarizedSegment]()
         let nMels = config.nMels
         let numSpeakers = config.maxSpeakers
         let subFactor = config.subsamplingFactor
@@ -393,9 +385,8 @@ public final class StreamingSortformerDiarizer {
                     }
 
                     let baseTime = Float(totalDiarFrames) * frameDuration
-                    let newSegments = binarizer.process(
+                    binarizer.process(
                         probs: coreProbs, nFrames: coreLen, baseTime: baseTime)
-                    allSegments.append(contentsOf: newSegments)
                     totalDiarFrames += coreLen
                 }
 
@@ -416,10 +407,11 @@ public final class StreamingSortformerDiarizer {
             }
         }
 
-        return allSegments
+        return []  // segments accumulated in binarizer, returned by flush()
     }
 
     /// Process a partial final chunk (fewer than coreMelFrames).
+    @discardableResult
     private func processPartialChunk() -> [DiarizedSegment] {
         let nMels = config.nMels
         let numSpeakers = config.maxSpeakers
@@ -463,7 +455,6 @@ public final class StreamingSortformerDiarizer {
             let coreLen = max(0, validEmbs - lcFrames)
             let predOffset = spkcacheLength + fifoLength + lcFrames
 
-            var segments = [DiarizedSegment]()
             if coreLen > 0 {
                 var coreProbs = [Float](repeating: 0, count: coreLen * numSpeakers)
                 for f in 0..<coreLen {
@@ -478,14 +469,14 @@ public final class StreamingSortformerDiarizer {
                     }
                 }
                 let baseTime = Float(totalDiarFrames) * frameDuration
-                segments = binarizer.process(probs: coreProbs, nFrames: coreLen, baseTime: baseTime)
+                binarizer.process(probs: coreProbs, nFrames: coreLen, baseTime: baseTime)
                 totalDiarFrames += coreLen
             }
 
             updateState(from: output, leftContext: lcFrames, rightContext: 0)
             melFrameCount = 0
             melBuffer = []
-            return segments
+            return []
         } catch {
             return []
         }
