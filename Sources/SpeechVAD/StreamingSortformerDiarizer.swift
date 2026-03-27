@@ -171,6 +171,8 @@ public final class StreamingSortformerDiarizer {
     ///
     /// - Returns: Any remaining segments (including currently-active speakers)
     public func flush() -> [DiarizedSegment] {
+        isFlushing = true
+
         // Extract remaining mel frames with right-side padding
         let finalMel = melExtractor.extractFinal()
         let finalFrames = finalMel.count / config.nMels
@@ -197,6 +199,7 @@ public final class StreamingSortformerDiarizer {
 
     /// Reset all state for a new audio session.
     public func resetState() {
+        isFlushing = false
         audioBuffer = []
         melBuffer = []
         melFrameCount = 0
@@ -226,6 +229,9 @@ public final class StreamingSortformerDiarizer {
 
     // MARK: - Internal: Chunk Processing
 
+    /// Whether we're in flush mode (finalize called, accept partial right context).
+    private var isFlushing: Bool = false
+
     /// Process all complete chunks available in the mel buffer.
     private func processAvailableChunks() -> [DiarizedSegment] {
         var allSegments = [DiarizedSegment]()
@@ -240,13 +246,18 @@ public final class StreamingSortformerDiarizer {
 
             // We need enough mel frames for core + right context
             let rightAvailable = totalMelExtracted - endFeat
-            let rightCtx = min(rightCtxMel, max(0, rightAvailable))
             let leftCtx = min(leftCtxMel, sttFeat)
 
-            // Need at least the core frames + some right context
+            // During normal streaming: require FULL right context before processing.
+            // During flush: accept whatever right context is available.
+            guard endFeat <= totalMelExtracted else { break }
+            if !isFlushing {
+                guard rightAvailable >= rightCtxMel else { break }
+            }
+            let rightCtx = min(rightCtxMel, max(0, rightAvailable))
+
             let neededInBuffer = (endFeat + rightCtx) - (totalMelExtracted - melFrameCount)
             guard neededInBuffer <= melFrameCount else { break }
-            guard endFeat <= totalMelExtracted else { break }
 
             let chunkStart = sttFeat - leftCtx
             let chunkEnd = endFeat + rightCtx
