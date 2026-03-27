@@ -1128,7 +1128,7 @@ Qwen3-ASR 1.7B 8-bit तुलनीय आकार में Whisper Large v3 
 मॉडल वेट लोकली कैश होते हैं। कैश स्थान बदलने के लिए:
 
 ```bash
-export QWEN3_CACHE_DIR=/path/to/cache
+export SPEECH_SWIFT_CACHE_DIR=/path/to/cache
 ```
 
 ## MLX Metal लाइब्रेरी

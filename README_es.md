@@ -1128,7 +1128,7 @@ Qwen3-ASR 1.7B 8-bit supera a Whisper Large v3 Turbo (2.5%) con un tamaño compa
 Los pesos de los modelos se almacenan en caché localmente. Puedes cambiar la ubicación de la caché con:
 
 ```bash
-export QWEN3_CACHE_DIR=/path/to/cache
+export SPEECH_SWIFT_CACHE_DIR=/path/to/cache
 ```
 
 ## Biblioteca Metal de MLX

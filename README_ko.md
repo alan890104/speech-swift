@@ -1128,7 +1128,7 @@ Qwen3-ASR 1.7B 8-bit는 비슷한 크기에서 Whisper Large v3 Turbo (2.5%)를 
 모델 가중치는 로컬에 캐시됩니다. 캐시 위치를 변경하려면:
 
 ```bash
-export QWEN3_CACHE_DIR=/path/to/cache
+export SPEECH_SWIFT_CACHE_DIR=/path/to/cache
 ```
 
 ## MLX Metal 라이브러리

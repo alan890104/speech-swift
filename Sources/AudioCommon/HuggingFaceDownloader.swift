@@ -161,18 +161,11 @@ public enum HuggingFaceDownloader {
 
     /// Resolve the base cache directory from env vars or system default.
     private static func resolveBaseCacheDir(cacheDirName: String) -> URL {
-        let fm = FileManager.default
-        let root: URL
-        if let override = ProcessInfo.processInfo.environment["QWEN3_CACHE_DIR"],
+        if let override = ProcessInfo.processInfo.environment["SPEECH_SWIFT_CACHE_DIR"],
            !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            root = URL(fileURLWithPath: override, isDirectory: true)
-        } else if let override = ProcessInfo.processInfo.environment["QWEN3_ASR_CACHE_DIR"],
-                  !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            // Legacy env var support
-            root = URL(fileURLWithPath: override, isDirectory: true)
-        } else {
-            root = fm.urls(for: .cachesDirectory, in: .userDomainMask).first!
+            return URL(fileURLWithPath: override, isDirectory: true)
         }
+        let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         return root.appendingPathComponent(cacheDirName, isDirectory: true)
     }
 
