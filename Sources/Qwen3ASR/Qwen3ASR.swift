@@ -63,6 +63,9 @@ public class Qwen3ASRModel {
         maxTokens: Int = 448,
         context: String? = nil
     ) -> String {
+        // Allow cooperative cancellation before expensive audio encoding
+        if Task.isCancelled { return "" }
+
         // Extract mel features
         let melFeatures = featureExtractor.process(audio, sampleRate: sampleRate)
 
@@ -187,6 +190,11 @@ public class Qwen3ASRModel {
             if nextToken == Int32(Qwen3ASRTokens.eosTokenId) {
                 break
             }
+
+            // Cooperative cancellation — stop generating if the caller cancelled.
+            // Each iteration is a full decoder forward pass, so checking here
+            // lets us bail between tokens without wasting GPU cycles.
+            if Task.isCancelled { break }
 
             // Get embedding for the new token
             let tokenEmbeds = textDecoder.embedTokens(MLXArray([nextToken]).expandedDimensions(axis: 0))
