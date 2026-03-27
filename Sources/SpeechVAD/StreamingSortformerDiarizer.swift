@@ -35,10 +35,12 @@ public final class StreamingSortformerDiarizer {
     private let coreMelFrames: Int     // 48
     /// Left context mel frames
     private let leftCtxMel: Int        // 8
-    /// Right context mel frames
+    /// Maximum right context mel frames (model's full capacity)
     private let rightCtxMel: Int       // 56
     /// Fixed CoreML input size
     private let coreMLInputFrames: Int // 112
+    /// Minimum right context mel frames required before processing
+    private let minRightCtxMel: Int
 
     // MARK: - Audio Buffering
 
@@ -77,7 +79,17 @@ public final class StreamingSortformerDiarizer {
 
     // MARK: - Init
 
-    init(model: SortformerCoreMLModel, config: SortformerConfig = .default) {
+    /// Create a streaming diarizer.
+    ///
+    /// - Parameters:
+    ///   - model: CoreML Sortformer model
+    ///   - config: Sortformer configuration
+    ///   - lookahead: Lookahead duration in seconds. Controls the trade-off between
+    ///     latency and accuracy. The model waits this long for future audio context
+    ///     before producing results.
+    ///     - `0.56` (default): Full right context. Maximum accuracy, matches batch `diarize()`.
+    ///     - `0.0`: No lookahead. Minimum latency, reduced accuracy.
+    init(model: SortformerCoreMLModel, config: SortformerConfig = .default, lookahead: Float? = nil) {
         self.model = model
         self.config = config
         self.melExtractor = SortformerMelExtractor(config: config)
@@ -87,6 +99,14 @@ public final class StreamingSortformerDiarizer {
         self.leftCtxMel = Int(config.leftContextSeconds) * sub     // 1 * 8 = 8
         self.rightCtxMel = Int(config.rightContextSeconds) * sub   // 7 * 8 = 56
         self.coreMLInputFrames = 112
+
+        // Convert lookahead seconds to mel frames, clamped to model's maximum
+        if let la = lookahead {
+            let laFrames = Int(la * Float(config.sampleRate) / Float(config.hopLength))
+            self.minRightCtxMel = min(max(laFrames, 0), rightCtxMel)
+        } else {
+            self.minRightCtxMel = rightCtxMel  // default: full context
+        }
 
         self.spkcache = [Float](repeating: 0, count: config.spkcacheLen * config.fcDModel)
         self.spkcachePreds = [Float](repeating: 0, count: config.spkcacheLen * config.maxSpeakers)
@@ -106,8 +126,15 @@ public final class StreamingSortformerDiarizer {
     // MARK: - Loading
 
     /// Load a pre-trained Sortformer model from HuggingFace.
+    ///
+    /// - Parameters:
+    ///   - modelId: HuggingFace model ID
+    ///   - lookahead: Lookahead in seconds. `nil` = full context (0.56s, max accuracy).
+    ///     `0` = no lookahead (min latency). Values between trade off latency vs accuracy.
+    ///   - progressHandler: callback for download progress
     public static func fromPretrained(
         modelId: String = defaultModelId,
+        lookahead: Float? = nil,
         progressHandler: ((Double, String) -> Void)? = nil,
         useOfflineMode: Bool? = nil
     ) async throws -> StreamingSortformerDiarizer {
@@ -140,7 +167,7 @@ public final class StreamingSortformerDiarizer {
         let coremlModel = SortformerCoreMLModel(model: mlModel, config: sortConfig)
 
         progressHandler?(1.0, "Ready")
-        return StreamingSortformerDiarizer(model: coremlModel, config: sortConfig)
+        return StreamingSortformerDiarizer(model: coremlModel, config: sortConfig, lookahead: lookahead)
     }
 
     // MARK: - Public API
@@ -248,11 +275,11 @@ public final class StreamingSortformerDiarizer {
             let rightAvailable = totalMelExtracted - endFeat
             let leftCtx = min(leftCtxMel, sttFeat)
 
-            // During normal streaming: require FULL right context before processing.
+            // During normal streaming: require minimum right context before processing.
             // During flush: accept whatever right context is available.
             guard endFeat <= totalMelExtracted else { break }
             if !isFlushing {
-                guard rightAvailable >= rightCtxMel else { break }
+                guard rightAvailable >= minRightCtxMel else { break }
             }
             let rightCtx = min(rightCtxMel, max(0, rightAvailable))
 
