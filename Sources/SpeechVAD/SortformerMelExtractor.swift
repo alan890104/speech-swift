@@ -171,6 +171,8 @@ class SortformerMelExtractor {
     /// - Parameter newSamples: New PCM Float32 audio samples at 16kHz
     /// - Returns: Flat array of new mel frames `[nNewFrames * nMels]`
     func extractIncremental(newSamples: [Float]) -> [Float] {
+        guard !newSamples.isEmpty else { return [] }
+
         if !streamStarted {
             // First chunk: add reflect padding at the beginning
             let padLen = nFFT / 2

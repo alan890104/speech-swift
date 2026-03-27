@@ -145,9 +145,16 @@ public final class SortformerDiarizer {
     public func diarize(
         audio: [Float],
         sampleRate: Int,
-        config: DiarizationConfig = .default,
+        config: DiarizationConfig? = nil,
         progressHandler: ((Double) -> Void)? = nil
     ) -> DiarizationResult {
+        // Default to NeMo-optimized thresholds from SortformerConfig
+        let config = config ?? DiarizationConfig(
+            onset: self.config.onset,
+            offset: self.config.offset,
+            minSpeechDuration: self.config.minSpeechDuration,
+            minSilenceDuration: self.config.minSilenceDuration)
+
         let samples = DiarizationHelpers.resample(audio, from: sampleRate, to: self.config.sampleRate)
 
         guard !samples.isEmpty else {

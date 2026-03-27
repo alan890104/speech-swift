@@ -183,6 +183,9 @@ public final class StreamingSortformerDiarizer {
     /// - Parameter samples: PCM Float32 audio at 16kHz
     /// - Returns: Zero or more finalized segments
     public func process(samples: [Float]) -> [DiarizedSegment] {
+        precondition(!isFlushing,
+            "process() called after flush(). Call resetState() before processing new audio.")
+
         // Extract new mel frames incrementally
         let newMel = melExtractor.extractIncremental(newSamples: samples)
         let newMelFrames = newMel.count / config.nMels
@@ -240,7 +243,8 @@ public final class StreamingSortformerDiarizer {
     public func diarize(
         audio: [Float],
         sampleRate: Int,
-        chunkSamples: Int = 16000
+        chunkSamples: Int = 16000,
+        progressHandler: ((Double) -> Void)? = nil
     ) -> DiarizationResult {
         resetState()
 
@@ -256,6 +260,7 @@ public final class StreamingSortformerDiarizer {
             let chunk = Array(samples[offset..<end])
             allSegments.append(contentsOf: process(samples: chunk))
             offset = end
+            progressHandler?(Double(offset) / Double(samples.count))
         }
         allSegments.append(contentsOf: flush())
 
