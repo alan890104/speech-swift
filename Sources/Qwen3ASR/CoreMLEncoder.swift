@@ -46,7 +46,8 @@ public class CoreMLASREncoder {
     public static func fromPretrained(
         modelId: String = defaultModelId,
         computeUnits: MLComputeUnits = .all,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> CoreMLASREncoder {
         let cacheDir = try HuggingFaceDownloader.getCacheDirectory(for: modelId)
 
@@ -54,7 +55,8 @@ public class CoreMLASREncoder {
         try await HuggingFaceDownloader.downloadWeights(
             modelId: modelId,
             to: cacheDir,
-            additionalFiles: ["encoder.mlmodelc/**", "config.json"]
+            additionalFiles: ["encoder.mlmodelc/**", "config.json"],
+            useOfflineMode: useOfflineMode
         ) { fraction in
             progressHandler?(fraction * 0.8, "Downloading CoreML encoder...")
         }

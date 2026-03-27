@@ -312,7 +312,8 @@ public extension Qwen3ASRModel {
     /// Load model from HuggingFace hub with automatic weight downloading
     static func fromPretrained(
         modelId: String = "aufklarer/Qwen3-ASR-0.6B-MLX-4bit",
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> Qwen3ASRModel {
         progressHandler?(0.0, "Downloading model...")
 
@@ -331,7 +332,8 @@ public extension Qwen3ASRModel {
             additionalFiles: ["vocab.json", "merges.txt", "tokenizer_config.json"],
             progressHandler: { progress in
                 progressHandler?(progress * 0.8, "Downloading weights...")
-            }
+            },
+            useOfflineMode: useOfflineMode
         )
 
         progressHandler?(0.80, "Loading tokenizer...")

@@ -173,7 +173,8 @@ public class ParakeetASRModel {
     /// - Returns: Initialized model ready for transcription
     public static func fromPretrained(
         modelId: String = defaultModelId,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> ParakeetASRModel {
         AudioLog.modelLoading.info("Loading Parakeet model: \(modelId)")
 
@@ -198,7 +199,8 @@ public class ParakeetASRModel {
                     "joint.mlmodelc/**",
                     "vocab.json",
                     "config.json",
-                ]
+                ],
+                useOfflineMode: useOfflineMode
             ) { fraction in
                 progressHandler?(fraction * 0.7, "Downloading model...")
             }

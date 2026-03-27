@@ -1512,7 +1512,8 @@ public final class PersonaPlexModel: Module {
 
     public static func fromPretrained(
         modelId: String = defaultModelId,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> PersonaPlexModel {
         // Download weights first to get config
         progressHandler?(0.05, "Downloading PersonaPlex weights...")
@@ -1531,7 +1532,8 @@ public final class PersonaPlexModel: Module {
         try await HuggingFaceDownloader.downloadWeights(
             modelId: modelId,
             to: modelDir,
-            additionalFiles: weightFiles
+            additionalFiles: weightFiles,
+            useOfflineMode: useOfflineMode
         ) { progress in
             progressHandler?(0.05 + progress * 0.5, "Downloading...")
         }

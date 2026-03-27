@@ -67,7 +67,8 @@ public final class Qwen3ChatModel: @unchecked Sendable {
         modelId: String = defaultModelId,
         quantization: Quantization = .int4,
         computeUnits: MLComputeUnits = .all,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> Qwen3ChatModel {
         let cacheDir = try HuggingFaceDownloader.getCacheDirectory(for: modelId)
 
@@ -86,7 +87,8 @@ public final class Qwen3ChatModel: @unchecked Sendable {
             ],
             progressHandler: { progress in
                 progressHandler?(progress * 0.7, "Downloading...")
-            }
+            },
+            useOfflineMode: useOfflineMode
         )
 
         // Load config

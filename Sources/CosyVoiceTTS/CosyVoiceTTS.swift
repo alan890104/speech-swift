@@ -55,7 +55,8 @@ public final class CosyVoiceTTSModel {
     /// Caches to ~/Library/Caches/qwen3-speech/
     public static func fromPretrained(
         modelId: String = "aufklarer/CosyVoice3-0.5B-MLX-4bit",
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> CosyVoiceTTSModel {
         let config = CosyVoiceConfig.default
         let model = CosyVoiceTTSModel(config: config)
@@ -76,7 +77,8 @@ public final class CosyVoiceTTSModel {
                 additionalFiles: [
                     "llm.safetensors", "flow.safetensors", "hifigan.safetensors",
                     "vocab.json", "merges.txt", "tokenizer_config.json",
-                ]
+                ],
+                useOfflineMode: useOfflineMode
             ) { progress in
                 progressHandler?(progress * 0.5, "Downloading...")
             }

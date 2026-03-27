@@ -1577,7 +1577,8 @@ public extension Qwen3TTSModel {
     static func fromPretrained(
         modelId: String = "aufklarer/Qwen3-TTS-12Hz-0.6B-Base-MLX-4bit",
         tokenizerModelId: String = "Qwen/Qwen3-TTS-Tokenizer-12Hz",
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> Qwen3TTSModel {
         progressHandler?(0.05, "Preparing download...")
 
@@ -1595,6 +1596,7 @@ public extension Qwen3TTSModel {
                 additionalFiles: ["vocab.json", "merges.txt", "tokenizer_config.json"],
                 progressHandler: { progress in
                     progressHandler?(0.1 + progress * 0.3, "Downloading TTS model...")
+                useOfflineMode: useOfflineMode
                 })
         }
 
@@ -1607,6 +1609,7 @@ public extension Qwen3TTSModel {
                 to: tokenizerCacheDir,
                 progressHandler: { progress in
                     progressHandler?(0.4 + progress * 0.2, "Downloading speech tokenizer...")
+                useOfflineMode: useOfflineMode
                 })
         }
 

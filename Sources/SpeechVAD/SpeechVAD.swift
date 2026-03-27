@@ -51,7 +51,8 @@ public final class PyannoteVADModel {
     public static func fromPretrained(
         modelId: String = defaultModelId,
         vadConfig: VADConfig = .default,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> PyannoteVADModel {
         progressHandler?(0.0, "Downloading model...")
 
@@ -62,7 +63,8 @@ public final class PyannoteVADModel {
             to: cacheDir,
             progressHandler: { progress in
                 progressHandler?(progress * 0.8, "Downloading weights...")
-            }
+            },
+            useOfflineMode: useOfflineMode
         )
 
         progressHandler?(0.8, "Loading model...")

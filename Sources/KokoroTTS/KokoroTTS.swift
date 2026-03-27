@@ -190,7 +190,8 @@ public final class KokoroTTSModel {
     public static func fromPretrained(
         modelId: String = defaultModelId,
         voice: String = defaultVoice,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> KokoroTTSModel {
         AudioLog.modelLoading.info("Loading Kokoro model: \(modelId)")
 
@@ -219,7 +220,8 @@ public final class KokoroTTSModel {
                     "us_gold.json",
                     "us_silver.json",
                     "voices/\(voice).json",
-                ]
+                ],
+                useOfflineMode: useOfflineMode
             ) { fraction in
                 progressHandler?(fraction * 0.7, "Downloading model...")
             }

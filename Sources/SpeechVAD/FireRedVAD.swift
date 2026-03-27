@@ -51,7 +51,8 @@ public final class FireRedVADModel {
     /// Load FireRedVAD from HuggingFace.
     public static func fromPretrained(
         modelId: String = defaultModelId,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> FireRedVADModel {
         #if canImport(CoreML)
         progressHandler?(0.0, "Downloading model...")
@@ -68,7 +69,8 @@ public final class FireRedVADModel {
             ],
             progressHandler: { progress in
                 progressHandler?(progress * 0.8, "Downloading model...")
-            }
+            },
+            useOfflineMode: useOfflineMode
         )
 
         progressHandler?(0.8, "Loading CoreML model...")

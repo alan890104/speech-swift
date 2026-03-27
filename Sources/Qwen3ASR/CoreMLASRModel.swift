@@ -30,13 +30,15 @@ public class CoreMLASRModel {
         decoderModelId: String = CoreMLASREncoder.defaultModelId,
         tokenizerModelId: String = "aufklarer/Qwen3-ASR-0.6B-MLX-4bit",
         computeUnits: MLComputeUnits = .all,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> CoreMLASRModel {
         // Download encoder (0-30%)
         progressHandler?(0.0, "Loading CoreML encoder...")
         let enc = try await CoreMLASREncoder.fromPretrained(
             modelId: encoderModelId,
-            computeUnits: computeUnits
+            computeUnits: computeUnits,
+            useOfflineMode: useOfflineMode
         ) { p, msg in
             progressHandler?(p * 0.3, msg)
         }
@@ -45,7 +47,8 @@ public class CoreMLASRModel {
         progressHandler?(0.3, "Loading CoreML decoder...")
         let dec = try await CoreMLTextDecoder.fromPretrained(
             modelId: decoderModelId,
-            computeUnits: computeUnits
+            computeUnits: computeUnits,
+            useOfflineMode: useOfflineMode
         ) { p, msg in
             progressHandler?(0.3 + p * 0.5, msg)
         }
@@ -56,7 +59,8 @@ public class CoreMLASRModel {
         try await HuggingFaceDownloader.downloadWeights(
             modelId: tokenizerModelId,
             to: tokenizerDir,
-            additionalFiles: ["vocab.json", "merges.txt", "tokenizer_config.json"]
+            additionalFiles: ["vocab.json", "merges.txt", "tokenizer_config.json"],
+            useOfflineMode: useOfflineMode
         )
 
         let model = CoreMLASRModel(encoder: enc, decoder: dec)

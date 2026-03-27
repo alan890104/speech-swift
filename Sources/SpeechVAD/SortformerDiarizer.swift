@@ -64,7 +64,8 @@ public final class SortformerDiarizer {
     /// - Returns: ready-to-use diarizer
     public static func fromPretrained(
         modelId: String = defaultModelId,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> SortformerDiarizer {
         progressHandler?(0.0, "Downloading Sortformer model...")
 
@@ -76,7 +77,8 @@ public final class SortformerDiarizer {
             additionalFiles: ["Sortformer.mlmodelc/**", "config.json"],
             progressHandler: { progress in
                 progressHandler?(progress * 0.8, "Downloading Sortformer model...")
-            }
+            },
+            useOfflineMode: useOfflineMode
         )
 
         progressHandler?(0.8, "Loading CoreML model...")

@@ -69,12 +69,13 @@ public class StreamingASR {
     public static func fromPretrained(
         asrModelId: String = "aufklarer/Qwen3-ASR-0.6B-MLX-4bit",
         vadModelId: String = SileroVADModel.defaultModelId,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> StreamingASR {
         let asr = try await Qwen3ASRModel.fromPretrained(
-            modelId: asrModelId, progressHandler: progressHandler)
+            modelId: asrModelId, progressHandler: progressHandler, useOfflineMode: useOfflineMode)
         let vad = try await SileroVADModel.fromPretrained(
-            modelId: vadModelId, progressHandler: progressHandler)
+            modelId: vadModelId, progressHandler: progressHandler, useOfflineMode: useOfflineMode)
         return StreamingASR(asrModel: asr, vadModel: vad)
     }
 

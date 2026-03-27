@@ -249,7 +249,8 @@ public extension Qwen3ForcedAligner {
     /// Load forced aligner model from HuggingFace hub
     static func fromPretrained(
         modelId: String = "aufklarer/Qwen3-ForcedAligner-0.6B-4bit",
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> Qwen3ForcedAligner {
         progressHandler?(0.0, "Downloading model...")
 
@@ -263,7 +264,8 @@ public extension Qwen3ForcedAligner {
                               "quantize_config.json"],
             progressHandler: { progress in
                 progressHandler?(progress * 0.8, "Downloading weights...")
-            }
+            },
+            useOfflineMode: useOfflineMode
         )
 
         progressHandler?(0.80, "Loading tokenizer...")

@@ -226,7 +226,8 @@ public final class SpeechEnhancer {
     /// - Returns: Ready-to-use speech enhancer
     public static func fromPretrained(
         modelId: String = defaultModelId,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> SpeechEnhancer {
         progressHandler?(0.0, "Downloading model...")
 
@@ -242,7 +243,8 @@ public final class SpeechEnhancer {
             ],
             progressHandler: { progress in
                 progressHandler?(progress * 0.8, "Downloading model...")
-            }
+            },
+            useOfflineMode: useOfflineMode
         )
 
         progressHandler?(0.8, "Loading model...")

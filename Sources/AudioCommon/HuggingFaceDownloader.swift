@@ -77,7 +77,8 @@ public enum HuggingFaceDownloader {
         modelId: String,
         to directory: URL,
         additionalFiles: [String] = [],
-        progressHandler: ((Double) -> Void)? = nil
+        progressHandler: ((Double) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws {
         var globs: [String] = ["config.json"]
 
@@ -95,7 +96,7 @@ public enum HuggingFaceDownloader {
         //   old: base/cacheKey         (flat, already has weights — won't reach here)
         //   new: base/models/org/model  (Hub-style)
         // For Hub API we need `base` as downloadBase.
-        let hub = makeHubApi(for: modelId, repoDir: directory)
+        let hub = makeHubApi(for: modelId, repoDir: directory, useOfflineMode: useOfflineMode)
         let repo = Hub.Repo(id: modelId)
 
         do {
@@ -171,7 +172,7 @@ public enum HuggingFaceDownloader {
 
     /// Create a `HubApi` whose `downloadBase` is derived from the repo directory that
     /// `getCacheDirectory` returned (strips the `models/<org>/<model>` suffix).
-    private static func makeHubApi(for modelId: String, repoDir: URL) -> HubApi {
+    private static func makeHubApi(for modelId: String, repoDir: URL, useOfflineMode: Bool? = nil) -> HubApi {
         // repoDir is  base/models/org/model
         // We need     base
         let repo = Hub.Repo(id: modelId)
@@ -186,6 +187,6 @@ public enum HuggingFaceDownloader {
             // Hub won't match this path, so we derive base from env/defaults.
             downloadBase = resolveBaseCacheDir(cacheDirName: repoDir.deletingLastPathComponent().lastPathComponent)
         }
-        return HubApi(downloadBase: downloadBase)
+        return HubApi(downloadBase: downloadBase, useOfflineMode: useOfflineMode)
     }
 }

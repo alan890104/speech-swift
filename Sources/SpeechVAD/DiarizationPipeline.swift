@@ -116,7 +116,8 @@ public final class PyannoteDiarizationPipeline {
         embModelId: String? = nil,
         embeddingEngine: WeSpeakerEngine = .mlx,
         useVADFilter: Bool = false,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> PyannoteDiarizationPipeline {
         progressHandler?(0.0, "Downloading segmentation model...")
 
@@ -127,7 +128,8 @@ public final class PyannoteDiarizationPipeline {
             to: segCacheDir,
             progressHandler: { progress in
                 progressHandler?(progress * 0.3, "Downloading segmentation weights...")
-            }
+            },
+            useOfflineMode: useOfflineMode
         )
 
         let segConfig = SegmentationConfig.default
@@ -142,7 +144,8 @@ public final class PyannoteDiarizationPipeline {
             engine: embeddingEngine,
             progressHandler: { progress, status in
                 progressHandler?(0.3 + progress * 0.4, status)
-            }
+            },
+            useOfflineMode: useOfflineMode
         )
 
         // Optionally load Silero VAD for pre-filtering
@@ -153,7 +156,8 @@ public final class PyannoteDiarizationPipeline {
                 engine: .mlx,
                 progressHandler: { progress, status in
                     progressHandler?(0.7 + progress * 0.25, status)
-                }
+                },
+                useOfflineMode: useOfflineMode
             )
         }
 

@@ -216,7 +216,8 @@ public extension Mimi {
         repoId: String = "kyutai/moshiko-pytorch-bf16",
         filename: String = "tokenizer-e351c8d8-checkpoint125.safetensors",
         numCodebooks: Int = 16,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        useOfflineMode: Bool? = nil
     ) async throws -> Mimi {
         let cfg = MimiConfig.moshiko(numCodebooks: numCodebooks)
         let model = Mimi(cfg: cfg)
@@ -229,7 +230,8 @@ public extension Mimi {
             try await HuggingFaceDownloader.downloadWeights(
                 modelId: repoId,
                 to: mimiDir,
-                additionalFiles: [filename]
+                additionalFiles: [filename],
+                useOfflineMode: useOfflineMode
             )
         }
 
