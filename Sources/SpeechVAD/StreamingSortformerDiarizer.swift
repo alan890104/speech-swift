@@ -118,6 +118,8 @@ public final class StreamingSortformerDiarizer {
             numSpeakers: config.maxSpeakers,
             onset: config.onset,
             offset: config.offset,
+            padOnset: config.padOnset,
+            padOffset: config.padOffset,
             minSpeechDuration: config.minSpeechDuration,
             minSilenceDuration: config.minSilenceDuration,
             frameDuration: frameDuration)

@@ -503,11 +503,14 @@ public final class SortformerDiarizer {
             )
 
             for seg in rawSegments {
-                let duration = seg.endTime - seg.startTime
+                // Apply padOnset/padOffset (NeMo post-processing)
+                let paddedStart = max(0, seg.startTime - config.padOnset)
+                let paddedEnd = min(seg.endTime + config.padOffset, audioDuration)
+                let duration = paddedEnd - paddedStart
                 guard duration >= minSpeechDuration else { continue }
                 allSegments.append(DiarizedSegment(
-                    startTime: seg.startTime,
-                    endTime: min(seg.endTime, audioDuration),
+                    startTime: paddedStart,
+                    endTime: paddedEnd,
                     speakerId: spk
                 ))
             }
@@ -525,7 +528,13 @@ extension SortformerDiarizer: SpeakerDiarizationModel {
     public var inputSampleRate: Int { config.sampleRate }
 
     public func diarize(audio: [Float], sampleRate: Int) -> [DiarizedSegment] {
-        diarize(audio: audio, sampleRate: sampleRate, config: .default).segments
+        // Use NeMo-optimized thresholds from SortformerConfig (not generic DiarizationConfig)
+        let cfg = DiarizationConfig(
+            onset: config.onset,
+            offset: config.offset,
+            minSpeechDuration: config.minSpeechDuration,
+            minSilenceDuration: config.minSilenceDuration)
+        return diarize(audio: audio, sampleRate: sampleRate, config: cfg).segments
     }
 }
 #endif

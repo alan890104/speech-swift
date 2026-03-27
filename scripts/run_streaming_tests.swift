@@ -18,15 +18,24 @@ struct StreamingBinarizer {
         case pendingSilence(speechStart: Float, silenceStart: Float)
     }
     private let numSpeakers: Int, onset: Float, offset: Float
+    private let padOnset: Float, padOffset: Float
     private let minSpeechDuration: Float, minSilenceDuration: Float, frameDuration: Float
     private var states: [SpeakerState]
 
-    init(numSpeakers: Int, onset: Float = 0.5, offset: Float = 0.3,
-         minSpeechDuration: Float = 0.3, minSilenceDuration: Float = 0.15, frameDuration: Float = 0.08) {
+    init(numSpeakers: Int, onset: Float = 0.641, offset: Float = 0.561,
+         padOnset: Float = 0.229, padOffset: Float = 0.079,
+         minSpeechDuration: Float = 0.296, minSilenceDuration: Float = 0.511, frameDuration: Float = 0.08) {
         self.numSpeakers = numSpeakers; self.onset = onset; self.offset = offset
+        self.padOnset = padOnset; self.padOffset = padOffset
         self.minSpeechDuration = minSpeechDuration; self.minSilenceDuration = minSilenceDuration
         self.frameDuration = frameDuration
         self.states = [SpeakerState](repeating: .idle, count: numSpeakers)
+    }
+
+    private func padded(_ start: Float, _ end: Float, _ speaker: Int) -> DiarizedSegment? {
+        let ps = max(0, start - padOnset), pe = end + padOffset
+        guard pe - ps >= minSpeechDuration else { return nil }
+        return DiarizedSegment(startTime: ps, endTime: pe, speakerId: speaker)
     }
 
     mutating func process(probs: [Float], nFrames: Int, baseTime: Float) -> [DiarizedSegment] {
@@ -43,9 +52,7 @@ struct StreamingBinarizer {
                 case .pendingSilence(let sp, let si):
                     if prob >= onset { states[s] = .active(startTime: sp) }
                     else if time - si >= minSilenceDuration {
-                        if si - sp >= minSpeechDuration {
-                            segs.append(DiarizedSegment(startTime: sp, endTime: si, speakerId: s))
-                        }
+                        if let seg = padded(sp, si, s) { segs.append(seg) }
                         states[s] = .idle
                     }
                 }
@@ -60,9 +67,9 @@ struct StreamingBinarizer {
             switch states[s] {
             case .idle: break
             case .active(let st):
-                if endTime - st >= minSpeechDuration { segs.append(DiarizedSegment(startTime: st, endTime: endTime, speakerId: s)) }
+                if let seg = padded(st, endTime, s) { segs.append(seg) }
             case .pendingSilence(let sp, let si):
-                if si - sp >= minSpeechDuration { segs.append(DiarizedSegment(startTime: sp, endTime: si, speakerId: s)) }
+                if let seg = padded(sp, si, s) { segs.append(seg) }
             }
             states[s] = .idle
         }
@@ -102,15 +109,18 @@ print("╚═══════════════════════�
 
 // ── StreamingBinarizer Tests ──
 
-test("testBinarizerSingleSpeaker") {
-    // Speaker 0 active from frame 5-20, then silent
-    var binarizer = StreamingBinarizer(numSpeakers: 2, onset: 0.5, offset: 0.3,
-        minSpeechDuration: 0.2, minSilenceDuration: 0.1, frameDuration: 0.08)
-    var probs = [Float](repeating: 0, count: 30 * 2)
-    for f in 5..<20 { probs[f * 2] = 0.9 }  // Speaker 0 active
+// Helper: create binarizer with NO padding (for deterministic sub-function tests)
+func noPadBinarizer(numSpeakers: Int = 2, onset: Float = 0.5, offset: Float = 0.3,
+                    minSpeech: Float = 0.2, minSilence: Float = 0.1) -> StreamingBinarizer {
+    StreamingBinarizer(numSpeakers: numSpeakers, onset: onset, offset: offset,
+        padOnset: 0, padOffset: 0, minSpeechDuration: minSpeech, minSilenceDuration: minSilence)
+}
 
+test("testBinarizerSingleSpeaker") {
+    var binarizer = noPadBinarizer()
+    var probs = [Float](repeating: 0, count: 30 * 2)
+    for f in 5..<20 { probs[f * 2] = 0.9 }
     let segs = binarizer.process(probs: probs, nFrames: 30, baseTime: 0)
-    // Should get one finalized segment (enough silence after frame 20)
     assert(segs.count == 1, "Expected 1 segment, got \(segs.count)")
     if let s = segs.first {
         assertEq(s.startTime, 5 * 0.08, "start")
@@ -119,13 +129,10 @@ test("testBinarizerSingleSpeaker") {
 }
 
 test("testBinarizerTwoSpeakers") {
-    var binarizer = StreamingBinarizer(numSpeakers: 2, onset: 0.5, offset: 0.3,
-        minSpeechDuration: 0.1, minSilenceDuration: 0.1, frameDuration: 0.08)
-    // Speaker 0: frames 0-10, Speaker 1: frames 15-25
+    var binarizer = noPadBinarizer(minSpeech: 0.1, minSilence: 0.1)
     var probs = [Float](repeating: 0, count: 40 * 2)
     for f in 0..<10 { probs[f * 2] = 0.9 }
     for f in 15..<25 { probs[f * 2 + 1] = 0.9 }
-
     let segs = binarizer.process(probs: probs, nFrames: 40, baseTime: 0)
     assert(segs.count == 2, "Expected 2 segments, got \(segs.count)")
     if segs.count == 2 {
@@ -135,42 +142,25 @@ test("testBinarizerTwoSpeakers") {
 }
 
 test("testBinarizerHysteresis") {
-    // Speaker dips below onset but stays above offset → should NOT split
-    var binarizer = StreamingBinarizer(numSpeakers: 1, onset: 0.5, offset: 0.3,
-        minSpeechDuration: 0.1, minSilenceDuration: 0.1, frameDuration: 0.08)
+    var binarizer = noPadBinarizer(numSpeakers: 1, minSpeech: 0.1, minSilence: 0.1)
     var probs = [Float](repeating: 0, count: 30)
-    for f in 0..<10 { probs[f] = 0.9 }   // active
-    for f in 10..<15 { probs[f] = 0.4 }  // dip (above offset 0.3)
-    for f in 15..<25 { probs[f] = 0.9 }  // active again
-    // frames 25-29: silent → triggers segment end
-
+    for f in 0..<10 { probs[f] = 0.9 }
+    for f in 10..<15 { probs[f] = 0.4 }  // dip above offset 0.3
+    for f in 15..<25 { probs[f] = 0.9 }
     let segs = binarizer.process(probs: probs, nFrames: 30, baseTime: 0)
-    // Should be ONE segment (hysteresis keeps it merged)
     assert(segs.count == 1, "Hysteresis should merge: got \(segs.count)")
 }
 
 test("testBinarizerStreaming") {
-    // Feed same data in two calls — result should be identical to one call
-    var b1 = StreamingBinarizer(numSpeakers: 1, onset: 0.5, offset: 0.3,
-        minSpeechDuration: 0.1, minSilenceDuration: 0.1, frameDuration: 0.08)
-    var b2 = StreamingBinarizer(numSpeakers: 1, onset: 0.5, offset: 0.3,
-        minSpeechDuration: 0.1, minSilenceDuration: 0.1, frameDuration: 0.08)
-
+    var b1 = noPadBinarizer(numSpeakers: 1, minSpeech: 0.1, minSilence: 0.1)
+    var b2 = noPadBinarizer(numSpeakers: 1, minSpeech: 0.1, minSilence: 0.1)
     var probs = [Float](repeating: 0, count: 30)
     for f in 3..<15 { probs[f] = 0.9 }
-
-    // b1: all at once
-    let segs1a = b1.process(probs: probs, nFrames: 30, baseTime: 0)
-    let segs1b = b1.flush(endTime: 30 * 0.08)
-    let all1 = segs1a + segs1b
-
-    // b2: split into two calls
+    let all1 = b1.process(probs: probs, nFrames: 30, baseTime: 0) + b1.flush(endTime: 30 * 0.08)
     let half = 15
-    let segs2a = b2.process(probs: Array(probs[0..<half]), nFrames: half, baseTime: 0)
-    let segs2b = b2.process(probs: Array(probs[half..<30]), nFrames: 30 - half, baseTime: Float(half) * 0.08)
-    let segs2c = b2.flush(endTime: 30 * 0.08)
-    let all2 = segs2a + segs2b + segs2c
-
+    let all2 = b2.process(probs: Array(probs[0..<half]), nFrames: half, baseTime: 0) +
+               b2.process(probs: Array(probs[half..<30]), nFrames: 30 - half, baseTime: Float(half) * 0.08) +
+               b2.flush(endTime: 30 * 0.08)
     assert(all1.count == all2.count, "Same segment count: \(all1.count) vs \(all2.count)")
     for i in 0..<min(all1.count, all2.count) {
         assertEq(all1[i].startTime, all2[i].startTime, "seg[\(i)] start")
@@ -180,10 +170,8 @@ test("testBinarizerStreaming") {
 }
 
 test("testBinarizerActiveSpeakers") {
-    var binarizer = StreamingBinarizer(numSpeakers: 4, onset: 0.5, offset: 0.3,
-        minSpeechDuration: 0.1, minSilenceDuration: 0.1, frameDuration: 0.08)
-    // Speakers 0 and 2 active
-    var probs: [Float] = [0.9, 0.1, 0.8, 0.1]
+    var binarizer = noPadBinarizer(numSpeakers: 4, minSpeech: 0.1, minSilence: 0.1)
+    let probs: [Float] = [0.9, 0.1, 0.8, 0.1]
     _ = binarizer.process(probs: probs, nFrames: 1, baseTime: 0)
     let active = binarizer.activeSpeakers
     assert(active.contains(0), "spk0 active")
@@ -193,14 +181,11 @@ test("testBinarizerActiveSpeakers") {
 }
 
 test("testBinarizerFlush") {
-    var binarizer = StreamingBinarizer(numSpeakers: 1, onset: 0.5, offset: 0.3,
-        minSpeechDuration: 0.1, minSilenceDuration: 0.1, frameDuration: 0.08)
-    // Start speaking, never stop
-    var probs = [Float](repeating: 0.9, count: 20)
+    var binarizer = noPadBinarizer(numSpeakers: 1, minSpeech: 0.1, minSilence: 0.1)
+    let probs = [Float](repeating: 0.9, count: 20)
     let segs = binarizer.process(probs: probs, nFrames: 20, baseTime: 0)
     assert(segs.isEmpty, "No finalized segments yet")
     assert(binarizer.activeSpeakers.count == 1, "Still active")
-
     let flushed = binarizer.flush(endTime: 20 * 0.08)
     assert(flushed.count == 1, "Flush should close open segment")
     if let s = flushed.first {
@@ -210,23 +195,72 @@ test("testBinarizerFlush") {
 }
 
 test("testBinarizerMinSpeechDuration") {
-    var binarizer = StreamingBinarizer(numSpeakers: 1, onset: 0.5, offset: 0.3,
-        minSpeechDuration: 0.5, minSilenceDuration: 0.1, frameDuration: 0.08)
-    // Very short speech: 2 frames = 0.16s < minSpeech=0.5s
+    var binarizer = noPadBinarizer(numSpeakers: 1, minSpeech: 0.5, minSilence: 0.1)
     var probs = [Float](repeating: 0, count: 20)
-    probs[3] = 0.9; probs[4] = 0.9  // 2 frames of speech
-
+    probs[3] = 0.9; probs[4] = 0.9
     let segs = binarizer.process(probs: probs, nFrames: 20, baseTime: 0)
-    // Should be filtered out (too short)
     assert(segs.isEmpty, "Short speech should be filtered: got \(segs.count)")
 }
 
 test("testBinarizerReset") {
-    var binarizer = StreamingBinarizer(numSpeakers: 2, frameDuration: 0.08)
+    var binarizer = noPadBinarizer()
     _ = binarizer.process(probs: [0.9, 0.1], nFrames: 1, baseTime: 0)
     assert(!binarizer.activeSpeakers.isEmpty, "Active before reset")
     binarizer.reset()
     assert(binarizer.activeSpeakers.isEmpty, "Idle after reset")
+}
+
+// ── Padding Tests ──
+
+test("testPadOnsetOffset") {
+    // padOnset=0.1, padOffset=0.05: segment should expand
+    var binarizer = StreamingBinarizer(numSpeakers: 1, onset: 0.5, offset: 0.3,
+        padOnset: 0.1, padOffset: 0.05, minSpeechDuration: 0.1, minSilenceDuration: 0.1)
+    var probs = [Float](repeating: 0, count: 30)
+    for f in 5..<15 { probs[f] = 0.9 }  // speech at 0.4s - 1.2s
+    let segs = binarizer.process(probs: probs, nFrames: 30, baseTime: 0)
+    assert(segs.count == 1, "Expected 1 padded segment, got \(segs.count)")
+    if let s = segs.first {
+        // Raw: 0.4s - 1.2s. Padded: 0.3s - 1.25s
+        assertEq(s.startTime, 0.4 - 0.1, accuracy: 0.01, "padded start")
+        assertEq(s.endTime, 1.2 + 0.05, accuracy: 0.01, "padded end")
+    }
+}
+
+test("testPadOnsetClampsToZero") {
+    // Speech starts at 0.0s, padOnset should not go negative
+    var binarizer = StreamingBinarizer(numSpeakers: 1, onset: 0.5, offset: 0.3,
+        padOnset: 0.5, padOffset: 0, minSpeechDuration: 0.1, minSilenceDuration: 0.1)
+    var probs = [Float](repeating: 0, count: 20)
+    for f in 0..<10 { probs[f] = 0.9 }
+    let segs = binarizer.process(probs: probs, nFrames: 20, baseTime: 0)
+    assert(segs.count == 1, "Expected 1 segment")
+    if let s = segs.first {
+        assertEq(s.startTime, 0.0, "padded start clamped to 0")
+    }
+}
+
+test("testPadFiltersTooShort") {
+    // Very short raw segment + padding still too short → filtered
+    var binarizer = StreamingBinarizer(numSpeakers: 1, onset: 0.5, offset: 0.3,
+        padOnset: 0.01, padOffset: 0.01, minSpeechDuration: 0.5, minSilenceDuration: 0.1)
+    var probs = [Float](repeating: 0, count: 20)
+    probs[5] = 0.9; probs[6] = 0.9  // 2 frames = 0.16s raw, +0.02 pad = 0.18s < 0.5s
+    let segs = binarizer.process(probs: probs, nFrames: 20, baseTime: 0)
+    assert(segs.isEmpty, "Padded but still too short: got \(segs.count)")
+}
+
+test("testNeMoCallHomeDefaults") {
+    // Verify NeMo CallHome defaults are applied
+    let b = StreamingBinarizer(numSpeakers: 4)
+    // onset/offset/pad values should be NeMo CallHome defaults (can't read private fields,
+    // but we can test behavior: speech must be > 0.296s after padding to be emitted)
+    var b2 = StreamingBinarizer(numSpeakers: 1)  // NeMo defaults
+    var probs = [Float](repeating: 0, count: 50)
+    for f in 5..<10 { probs[f] = 0.9 }  // 5 frames = 0.4s raw speech
+    // With padOnset=0.229 + padOffset=0.079: padded = 0.4 + 0.229 + 0.079 = 0.708s > 0.296s → kept
+    let segs = b2.process(probs: probs, nFrames: 50, baseTime: 0)
+    assert(segs.count == 1, "NeMo defaults should keep 0.4s speech: got \(segs.count)")
 }
 
 // ── Incremental Mel Extraction Test ──

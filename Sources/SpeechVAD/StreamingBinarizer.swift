@@ -24,6 +24,8 @@ struct StreamingBinarizer {
     private let numSpeakers: Int
     private let onset: Float
     private let offset: Float
+    private let padOnset: Float
+    private let padOffset: Float
     private let minSpeechDuration: Float
     private let minSilenceDuration: Float
     private let frameDuration: Float
@@ -33,15 +35,19 @@ struct StreamingBinarizer {
 
     init(
         numSpeakers: Int,
-        onset: Float = 0.5,
-        offset: Float = 0.3,
-        minSpeechDuration: Float = 0.3,
-        minSilenceDuration: Float = 0.15,
+        onset: Float = 0.641,
+        offset: Float = 0.561,
+        padOnset: Float = 0.229,
+        padOffset: Float = 0.079,
+        minSpeechDuration: Float = 0.296,
+        minSilenceDuration: Float = 0.511,
         frameDuration: Float = 0.08
     ) {
         self.numSpeakers = numSpeakers
         self.onset = onset
         self.offset = offset
+        self.padOnset = padOnset
+        self.padOffset = padOffset
         self.minSpeechDuration = minSpeechDuration
         self.minSilenceDuration = minSilenceDuration
         self.frameDuration = frameDuration
@@ -84,11 +90,9 @@ struct StreamingBinarizer {
                         // False alarm — speech resumed
                         states[s] = .active(startTime: speechStart)
                     } else if time - silenceStart >= minSilenceDuration {
-                        // Silence confirmed — emit segment if long enough
-                        let duration = silenceStart - speechStart
-                        if duration >= minSpeechDuration {
-                            segments.append(DiarizedSegment(
-                                startTime: speechStart, endTime: silenceStart, speakerId: s))
+                        // Silence confirmed — emit segment if long enough (with padding)
+                        if let seg = padded(speechStart, silenceStart, s) {
+                            segments.append(seg)
                         }
                         states[s] = .idle
                     }
@@ -111,17 +115,12 @@ struct StreamingBinarizer {
             case .idle:
                 break
             case .active(let startTime):
-                let duration = endTime - startTime
-                if duration >= minSpeechDuration {
-                    segments.append(DiarizedSegment(
-                        startTime: startTime, endTime: endTime, speakerId: s))
+                if let seg = padded(startTime, endTime, s) {
+                    segments.append(seg)
                 }
             case .pendingSilence(let speechStart, let silenceStart):
-                // Treat pending silence as end of speech
-                let duration = silenceStart - speechStart
-                if duration >= minSpeechDuration {
-                    segments.append(DiarizedSegment(
-                        startTime: speechStart, endTime: silenceStart, speakerId: s))
+                if let seg = padded(speechStart, silenceStart, s) {
+                    segments.append(seg)
                 }
             }
             states[s] = .idle
@@ -142,6 +141,15 @@ struct StreamingBinarizer {
             }
         }
         return result
+    }
+
+    /// Apply padOnset/padOffset to a raw segment and filter by minSpeechDuration.
+    private func padded(_ start: Float, _ end: Float, _ speaker: Int) -> DiarizedSegment? {
+        let paddedStart = max(0, start - padOnset)
+        let paddedEnd = end + padOffset
+        let duration = paddedEnd - paddedStart
+        guard duration >= minSpeechDuration else { return nil }
+        return DiarizedSegment(startTime: paddedStart, endTime: paddedEnd, speakerId: speaker)
     }
 
     /// Reset all state for a new audio session.

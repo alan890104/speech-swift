@@ -68,7 +68,11 @@ public struct SortformerConfig: Sendable {
     public var onset: Float
     /// Offset threshold for speaker activity binarization
     public var offset: Float
-    /// Minimum speech segment duration in seconds
+    /// Duration (seconds) to prepend before each detected speech segment
+    public var padOnset: Float
+    /// Duration (seconds) to append after each detected speech segment
+    public var padOffset: Float
+    /// Minimum speech segment duration in seconds (after padding); shorter segments are discarded
     public var minSpeechDuration: Float
     /// Minimum silence gap to split segments, in seconds
     public var minSilenceDuration: Float
@@ -76,6 +80,10 @@ public struct SortformerConfig: Sendable {
     // MARK: - Presets
 
     /// Default streaming configuration matching the NeMo checkpoint.
+    /// Default configuration with NeMo CallHome-optimized post-processing thresholds.
+    ///
+    /// Post-processing parameters from:
+    /// `diar_streaming_sortformer_4spk-v2_callhome-part1.yaml`
     public static let `default` = SortformerConfig(
         nMels: 128,
         nFFT: 400,
@@ -97,10 +105,12 @@ public struct SortformerConfig: Sendable {
         silThreshold: 0.2,
         scoresBoostLatest: 0.05,
         spkcacheUpdatePeriod: 188,
-        onset: 0.5,
-        offset: 0.3,
-        minSpeechDuration: 0.3,
-        minSilenceDuration: 0.15
+        onset: 0.641,
+        offset: 0.561,
+        padOnset: 0.229,
+        padOffset: 0.079,
+        minSpeechDuration: 0.296,
+        minSilenceDuration: 0.511
     )
 
     public init(
@@ -124,10 +134,12 @@ public struct SortformerConfig: Sendable {
         silThreshold: Float = 0.2,
         scoresBoostLatest: Float = 0.05,
         spkcacheUpdatePeriod: Int = 188,
-        onset: Float = 0.5,
-        offset: Float = 0.3,
-        minSpeechDuration: Float = 0.3,
-        minSilenceDuration: Float = 0.15
+        onset: Float = 0.641,
+        offset: Float = 0.561,
+        padOnset: Float = 0.229,
+        padOffset: Float = 0.079,
+        minSpeechDuration: Float = 0.296,
+        minSilenceDuration: Float = 0.511
     ) {
         self.nMels = nMels
         self.nFFT = nFFT
@@ -151,6 +163,8 @@ public struct SortformerConfig: Sendable {
         self.spkcacheUpdatePeriod = spkcacheUpdatePeriod
         self.onset = onset
         self.offset = offset
+        self.padOnset = padOnset
+        self.padOffset = padOffset
         self.minSpeechDuration = minSpeechDuration
         self.minSilenceDuration = minSilenceDuration
     }
