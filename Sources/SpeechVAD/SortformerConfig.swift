@@ -43,6 +43,25 @@ public struct SortformerConfig: Sendable {
     /// Maximum number of speakers the model can predict
     public let maxSpeakers: Int
 
+    // MARK: - AOSC Compression
+
+    /// Number of silence frames per speaker in compressed cache
+    public let spkcacheSilFramesPerSpk: Int
+    /// Rate for strong boosting (ensures minimum per-speaker representation)
+    public let strongBoostRate: Float
+    /// Rate for weak boosting (prevents single-speaker dominance)
+    public let weakBoostRate: Float
+    /// Minimum fraction of positive scores to trigger overlap filtering
+    public let minPosScoresRate: Float
+    /// Minimum probability for score computation (clamping threshold)
+    public let predScoreThreshold: Float
+    /// Maximum sum of speaker probabilities to consider a frame as silence
+    public let silThreshold: Float
+    /// Score boost for newly added frames (temporal freshness)
+    public let scoresBoostLatest: Float
+    /// Number of frames to pop from FIFO per update cycle
+    public let spkcacheUpdatePeriod: Int
+
     // MARK: - Post-processing
 
     /// Onset threshold for speaker activity binarization
@@ -70,6 +89,14 @@ public struct SortformerConfig: Sendable {
         fifoLen: 40,
         fcDModel: 512,
         maxSpeakers: 4,
+        spkcacheSilFramesPerSpk: 3,
+        strongBoostRate: 0.75,
+        weakBoostRate: 1.5,
+        minPosScoresRate: 0.5,
+        predScoreThreshold: 0.25,
+        silThreshold: 0.2,
+        scoresBoostLatest: 0.05,
+        spkcacheUpdatePeriod: 188,
         onset: 0.5,
         offset: 0.3,
         minSpeechDuration: 0.3,
@@ -89,6 +116,14 @@ public struct SortformerConfig: Sendable {
         fifoLen: Int = 40,
         fcDModel: Int = 512,
         maxSpeakers: Int = 4,
+        spkcacheSilFramesPerSpk: Int = 3,
+        strongBoostRate: Float = 0.75,
+        weakBoostRate: Float = 1.5,
+        minPosScoresRate: Float = 0.5,
+        predScoreThreshold: Float = 0.25,
+        silThreshold: Float = 0.2,
+        scoresBoostLatest: Float = 0.05,
+        spkcacheUpdatePeriod: Int = 188,
         onset: Float = 0.5,
         offset: Float = 0.3,
         minSpeechDuration: Float = 0.3,
@@ -106,6 +141,14 @@ public struct SortformerConfig: Sendable {
         self.fifoLen = fifoLen
         self.fcDModel = fcDModel
         self.maxSpeakers = maxSpeakers
+        self.spkcacheSilFramesPerSpk = spkcacheSilFramesPerSpk
+        self.strongBoostRate = strongBoostRate
+        self.weakBoostRate = weakBoostRate
+        self.minPosScoresRate = minPosScoresRate
+        self.predScoreThreshold = predScoreThreshold
+        self.silThreshold = silThreshold
+        self.scoresBoostLatest = scoresBoostLatest
+        self.spkcacheUpdatePeriod = spkcacheUpdatePeriod
         self.onset = onset
         self.offset = offset
         self.minSpeechDuration = minSpeechDuration
