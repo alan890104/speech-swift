@@ -120,7 +120,7 @@ public final class SortformerDiarizer {
         progressHandler: ((Double) -> Void)? = nil
     ) -> DiarizationResult {
         // Default to NeMo-optimized thresholds from SortformerConfig
-        let config = config ?? DiarizationConfig(
+        let diarConfig = config ?? DiarizationConfig(
             onset: self.config.onset,
             offset: self.config.offset,
             minSpeechDuration: self.config.minSpeechDuration,
@@ -229,10 +229,10 @@ public final class SortformerDiarizer {
             allChunkProbs: allChunkProbs,
             audioDuration: audioDuration,
             numSpeakers: numSpeakers,
-            onset: config.onset,
-            offset: config.offset,
-            minSpeechDuration: config.minSpeechDuration,
-            minSilenceDuration: config.minSilenceDuration
+            onset: diarConfig.onset,
+            offset: diarConfig.offset,
+            minSpeechDuration: diarConfig.minSpeechDuration,
+            minSilenceDuration: diarConfig.minSilenceDuration
         )
 
         let usedSpeakers = Set(segments.map(\.speakerId))
