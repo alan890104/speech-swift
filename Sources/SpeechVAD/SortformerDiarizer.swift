@@ -3,6 +3,14 @@ import CoreML
 import Foundation
 import AudioCommon
 
+/// Single diarization frame with per-speaker activity probabilities (80ms resolution).
+public struct SpeakerFrame: Sendable {
+    /// Absolute time in seconds, measured from the most recent `resetState()` call
+    public let time: Float
+    /// Per-speaker activity probabilities [maxSpeakers=4], each 0.0~1.0
+    public let probabilities: [Float]
+}
+
 /// End-to-end neural speaker diarization using NVIDIA Sortformer (CoreML).
 ///
 /// Sortformer directly predicts per-frame speaker activity for up to 4 speakers
@@ -22,26 +30,38 @@ public final class SortformerDiarizer {
     public static let defaultModelId = "aufklarer/Sortformer-Diarization-CoreML"
 
     private let model: SortformerCoreMLModel
-    private let melExtractor: SortformerMelExtractor
     let config: SortformerConfig
 
     /// Frame duration from model metadata (0.08s = 80ms per diarization frame)
     private let frameDuration: Float = 0.08
 
-    // MARK: - Streaming State
+    // MARK: - State
 
+    /// Batch-mode model state (spkcache, FIFO, AOSC) — used by diarize()
     private var state: SortformerStreamingState
+    /// Streaming chunk engine — used by process()/flush()
+    private var engine: SortformerChunkEngine
+    /// Whether flush() has been called (prevents further process() calls)
+    private var streamFlushed: Bool = false
 
     init(model: SortformerCoreMLModel, config: SortformerConfig = .default) {
         self.model = model
         self.config = config
-        self.melExtractor = SortformerMelExtractor(config: config)
         self.state = SortformerStreamingState(config: config)
+        self.engine = SortformerChunkEngine(
+            model: model,
+            melExtractor: SortformerMelExtractor(config: config),
+            config: config)
     }
 
-    /// Reset streaming state between different audio files.
+    /// Reset all streaming state for a new audio session.
+    ///
+    /// Clears model state (spkcache, FIFO, AOSC) and incremental mel extraction state.
+    /// Call before starting a new `process()`/`flush()` cycle.
     public func resetState() {
         state.reset(config: config)
+        engine.reset()
+        streamFlushed = false
     }
 
     // MARK: - Loading
@@ -100,6 +120,58 @@ public final class SortformerDiarizer {
         return SortformerDiarizer(model: coremlModel, config: config)
     }
 
+    // MARK: - Incremental Processing
+
+    /// Incrementally process new audio samples.
+    ///
+    /// Extracts mel features, runs CoreML inference when enough frames accumulate,
+    /// and returns per-frame speaker activity probabilities.
+    ///
+    /// Call repeatedly with streaming audio chunks (e.g., 1 second at a time).
+    /// State (spkcache, fifo) is preserved across calls for consistent speaker IDs.
+    ///
+    /// Returns empty array during warmup (first ~1s, before enough mel frames for one chunk).
+    ///
+    /// - Parameters:
+    ///   - samples: PCM Float32 audio samples
+    ///   - sampleRate: sample rate of the input audio (default: 16000)
+    /// - Returns: per-frame speaker activity probabilities for newly processed frames
+    public func process(samples: [Float], sampleRate: Int = 16000) -> [SpeakerFrame] {
+        precondition(!streamFlushed,
+            "process() called after flush(). Call resetState() before processing new audio.")
+        guard !samples.isEmpty else { return [] }
+        let resampled = (sampleRate == config.sampleRate)
+            ? samples
+            : DiarizationHelpers.resample(samples, from: sampleRate, to: config.sampleRate)
+        return chunksToFrames(engine.feedSamples(resampled))
+    }
+
+    /// Finalize: process any remaining buffered mel frames.
+    ///
+    /// Call at end of stream. Returns the final batch of `SpeakerFrame`s.
+    /// After calling this, call `resetState()` before processing new audio.
+    public func flush() -> [SpeakerFrame] {
+        streamFlushed = true
+        return chunksToFrames(engine.flush())
+    }
+
+    private func chunksToFrames(_ chunks: [ChunkPredictions]) -> [SpeakerFrame] {
+        let numSpeakers = config.maxSpeakers
+        var frames = [SpeakerFrame]()
+        for chunk in chunks {
+            for f in 0..<chunk.coreFrameCount {
+                let frameIndex = chunk.startFrameIndex + f
+                let time = Float(frameIndex) * frameDuration
+                var probs = [Float](repeating: 0, count: numSpeakers)
+                for s in 0..<numSpeakers {
+                    probs[s] = chunk.probabilities[f * numSpeakers + s]
+                }
+                frames.append(SpeakerFrame(time: time, probabilities: probs))
+            }
+        }
+        return frames
+    }
+
     // MARK: - Diarization
 
     /// Run speaker diarization on complete audio.
@@ -135,7 +207,7 @@ public final class SortformerDiarizer {
         resetState()
 
         // Extract mel features for the entire audio: [totalMelFrames, 128]
-        let (melSpec, totalMelFrames) = melExtractor.extract(samples)
+        let (melSpec, totalMelFrames) = engine.melExtractor.extract(samples)
 
         guard totalMelFrames > 0 else {
             return DiarizationResult(segments: [], numSpeakers: 0, speakerEmbeddings: [])
@@ -212,7 +284,7 @@ public final class SortformerDiarizer {
                 // Update streaming state (FIFO overflow → spkcache with AOSC)
                 state.update(from: output, leftContext: lcFrames, rightContext: rcFrames, config: self.config)
             } catch {
-                print("Warning: Sortformer inference failed on chunk at mel frame \(sttFeat): \(error)")
+                AudioLog.inference.warning("Sortformer inference failed at mel frame \(sttFeat): \(error.localizedDescription)")
             }
 
             sttFeat = endFeat
