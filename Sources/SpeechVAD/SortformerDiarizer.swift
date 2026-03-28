@@ -210,7 +210,7 @@ public final class SortformerDiarizer {
                 allChunkProbs.append(chunkProbs)
 
                 // Update streaming state (FIFO overflow → spkcache with AOSC)
-                state.update(from: output, leftContext: lcFrames, rightContext: rcFrames, config: config)
+                state.update(from: output, leftContext: lcFrames, rightContext: rcFrames, config: self.config)
             } catch {
                 print("Warning: Sortformer inference failed on chunk at mel frame \(sttFeat): \(error)")
             }
