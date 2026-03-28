@@ -90,9 +90,11 @@ public struct DiarizeCommand: ParsableCommand {
             let diarizer = try await SortformerDiarizer.fromPretrained(
                 progressHandler: reportProgress
             )
+            // Pass nil to use SortformerConfig's NeMo DIHARD3 defaults
+            // (DiarizationConfig has different defaults that don't match NeMo)
             print("Running diarization (Sortformer)...")
             let start = Date()
-            result = diarizer.diarize(audio: audio, sampleRate: 16000, config: config)
+            result = diarizer.diarize(audio: audio, sampleRate: 16000, config: nil)
             elapsed = Date().timeIntervalSince(start)
         }
 
