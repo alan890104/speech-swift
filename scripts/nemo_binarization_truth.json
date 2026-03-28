@@ -106,6 +106,33 @@
           "end": 12.722
         }
       ]
+    },
+    {
+      "name": "trailing_speech_dihard3",
+      "segments": [
+        {
+          "start": 0.0,
+          "end": 0.322
+        }
+      ]
+    },
+    {
+      "name": "single_trailing_frame_dihard3",
+      "segments": [
+        {
+          "start": 0.177,
+          "end": 0.242
+        }
+      ]
+    },
+    {
+      "name": "trailing_speech_callhome",
+      "segments": [
+        {
+          "start": 0.0,
+          "end": 0.799
+        }
+      ]
     }
   ],
   "raw_probs": {
@@ -551,6 +578,31 @@
       0.010117665904976248,
       0.19985649368254532,
       0.1672055170159904
+    ],
+    "trailing_speech_dihard3": [
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      0.9
+    ],
+    "single_trailing_frame_dihard3": [
+      0.0,
+      0.0,
+      0.0,
+      0.9
+    ],
+    "trailing_speech_callhome": [
+      0.0,
+      0.0,
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      0.9
     ]
   },
   "dihard3_params": {

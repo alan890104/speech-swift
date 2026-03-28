@@ -60,16 +60,7 @@ public final class StreamingSortformerDiarizer {
 
     // MARK: - Model State (AOSC)
 
-    /// Speaker cache embeddings, flat `[spkcacheLen * fcDModel]`
-    private var spkcache: [Float]
-    private var spkcacheLength: Int = 0
-    private var spkcachePreds: [Float]
-    private var hasSpkcachePreds: Bool = false
-    private var fifo: [Float]
-    private var fifoLength: Int = 0
-    private var fifoPreds: [Float]
-    private var meanSilEmb: [Float]
-    private var nSilFrames: Int = 0
+    private var state: SortformerStreamingState
 
     // MARK: - Binarization
 
@@ -108,11 +99,7 @@ public final class StreamingSortformerDiarizer {
             self.minRightCtxMel = rightCtxMel  // default: full context
         }
 
-        self.spkcache = [Float](repeating: 0, count: config.spkcacheLen * config.fcDModel)
-        self.spkcachePreds = [Float](repeating: 0, count: config.spkcacheLen * config.maxSpeakers)
-        self.fifo = [Float](repeating: 0, count: config.fifoLen * config.fcDModel)
-        self.fifoPreds = [Float](repeating: 0, count: config.fifoLen * config.maxSpeakers)
-        self.meanSilEmb = [Float](repeating: 0, count: config.fcDModel)
+        self.state = SortformerStreamingState(config: config)
 
         self.binarizer = StreamingBinarizer(
             numSpeakers: config.maxSpeakers,
@@ -120,8 +107,8 @@ public final class StreamingSortformerDiarizer {
             offset: config.offset,
             padOnset: config.padOnset,
             padOffset: config.padOffset,
-            minDurationOn: config.minSilenceDuration,
-            minDurationOff: config.minSpeechDuration,
+            minDurationOn: config.minSpeechDuration,
+            minDurationOff: config.minSilenceDuration,
             frameDuration: frameDuration)
     }
 
@@ -222,7 +209,8 @@ public final class StreamingSortformerDiarizer {
         }
 
         // Flush binarizer — applies NeMo filtering (short speech removal + gap filling)
-        let endTime = Float(totalDiarFrames) * frameDuration
+        // endTime = last frame time, matching NeMo's `i * frame_length_in_sec` (i = N-1)
+        let endTime = totalDiarFrames > 0 ? Float(totalDiarFrames - 1) * frameDuration : 0
         return binarizer.flush(endTime: endTime)
     }
 
@@ -279,16 +267,7 @@ public final class StreamingSortformerDiarizer {
         totalDiarFrames = 0
 
         melExtractor.resetStreamingState()
-
-        spkcache = [Float](repeating: 0, count: config.spkcacheLen * config.fcDModel)
-        spkcacheLength = 0
-        spkcachePreds = [Float](repeating: 0, count: config.spkcacheLen * config.maxSpeakers)
-        hasSpkcachePreds = false
-        fifo = [Float](repeating: 0, count: config.fifoLen * config.fcDModel)
-        fifoLength = 0
-        fifoPreds = [Float](repeating: 0, count: config.fifoLen * config.maxSpeakers)
-        meanSilEmb = [Float](repeating: 0, count: config.fcDModel)
-        nSilFrames = 0
+        state.reset(config: config)
 
         binarizer.reset()
     }
@@ -357,17 +336,17 @@ public final class StreamingSortformerDiarizer {
                 let output = try model.predict(
                     chunk: chunkMel,
                     chunkLength: actualLen,
-                    spkcache: spkcache,
-                    spkcacheLength: spkcacheLength,
-                    fifo: fifo,
-                    fifoLength: fifoLength)
+                    spkcache: state.spkcache,
+                    spkcacheLength: state.spkcacheLength,
+                    fifo: state.fifo,
+                    fifoLength: state.fifoLength)
 
                 // Extract core predictions
                 let validEmbs = output.validEmbFrames
                 let lcFrames = Int(Float(leftCtx) / Float(subFactor) + 0.5)
                 let rcFrames = Int(ceil(Float(rightCtx) / Float(subFactor)))
                 let coreLen = max(0, validEmbs - lcFrames - rcFrames)
-                let predOffset = spkcacheLength + fifoLength + lcFrames
+                let predOffset = state.spkcacheLength + state.fifoLength + lcFrames
 
                 // Feed core predictions to binarizer
                 if coreLen > 0 {
@@ -391,7 +370,7 @@ public final class StreamingSortformerDiarizer {
                 }
 
                 // Update streaming state (FIFO + AOSC)
-                updateState(from: output, leftContext: lcFrames, rightContext: rcFrames)
+                state.update(from: output, leftContext: lcFrames, rightContext: rcFrames, config: config)
 
             } catch {
                 // Skip failed chunk
@@ -445,15 +424,15 @@ public final class StreamingSortformerDiarizer {
             let output = try model.predict(
                 chunk: chunkMel,
                 chunkLength: actualLen,
-                spkcache: spkcache,
-                spkcacheLength: spkcacheLength,
-                fifo: fifo,
-                fifoLength: fifoLength)
+                spkcache: state.spkcache,
+                spkcacheLength: state.spkcacheLength,
+                fifo: state.fifo,
+                fifoLength: state.fifoLength)
 
             let validEmbs = output.validEmbFrames
             let lcFrames = Int(Float(leftCtx) / Float(subFactor) + 0.5)
             let coreLen = max(0, validEmbs - lcFrames)
-            let predOffset = spkcacheLength + fifoLength + lcFrames
+            let predOffset = state.spkcacheLength + state.fifoLength + lcFrames
 
             if coreLen > 0 {
                 var coreProbs = [Float](repeating: 0, count: coreLen * numSpeakers)
@@ -473,133 +452,12 @@ public final class StreamingSortformerDiarizer {
                 totalDiarFrames += coreLen
             }
 
-            updateState(from: output, leftContext: lcFrames, rightContext: 0)
+            state.update(from: output, leftContext: lcFrames, rightContext: 0, config: config)
             melFrameCount = 0
             melBuffer = []
             return []
         } catch {
             return []
-        }
-    }
-
-    // MARK: - State Management (same as SortformerDiarizer)
-
-    /// Update spkcache and fifo buffers with AOSC compression.
-    /// Identical to `SortformerDiarizer.updateState`.
-    private func updateState(from output: SortformerOutput, leftContext: Int, rightContext: Int) {
-        let nSpk = config.maxSpeakers
-        let dim = config.fcDModel
-        let fifoCapacity = config.fifoLen
-        let cacheCapacity = config.spkcacheLen
-
-        let totalChunkFrames = output.validEmbFrames
-        let coreFrames = totalChunkFrames - leftContext - rightContext
-        guard coreFrames > 0 else { return }
-
-        // Update FIFO predictions from model output
-        let fifoPredStart = spkcacheLength * nSpk
-        for f in 0..<fifoLength {
-            let srcIdx = fifoPredStart + f * nSpk
-            let dstIdx = f * nSpk
-            for s in 0..<nSpk {
-                fifoPreds[dstIdx + s] = output.speakerPreds[srcIdx + s]
-            }
-        }
-
-        let coreEmbStart = leftContext * dim
-        let corePredStart = (spkcacheLength + fifoLength + leftContext) * nSpk
-        let newFifoLength = fifoLength + coreFrames
-
-        if newFifoLength <= fifoCapacity {
-            for f in 0..<coreFrames {
-                let srcEmbBase = coreEmbStart + f * dim
-                let srcPredBase = corePredStart + f * nSpk
-                let dstFrame = fifoLength + f
-                for d in 0..<dim { fifo[dstFrame * dim + d] = output.encoderEmbs[srcEmbBase + d] }
-                for s in 0..<nSpk { fifoPreds[dstFrame * nSpk + s] = output.speakerPreds[srcPredBase + s] }
-            }
-            fifoLength = newFifoLength
-            return
-        }
-
-        // FIFO overflow
-        var tempFifoEmb = [Float](repeating: 0, count: newFifoLength * dim)
-        var tempFifoPred = [Float](repeating: 0, count: newFifoLength * nSpk)
-        for i in 0..<(fifoLength * dim) { tempFifoEmb[i] = fifo[i] }
-        for i in 0..<(fifoLength * nSpk) { tempFifoPred[i] = fifoPreds[i] }
-        for f in 0..<coreFrames {
-            let srcEmbBase = coreEmbStart + f * dim
-            let srcPredBase = corePredStart + f * nSpk
-            let dstFrame = fifoLength + f
-            for d in 0..<dim { tempFifoEmb[dstFrame * dim + d] = output.encoderEmbs[srcEmbBase + d] }
-            for s in 0..<nSpk { tempFifoPred[dstFrame * nSpk + s] = output.speakerPreds[srcPredBase + s] }
-        }
-
-        var popOutLen = config.spkcacheUpdatePeriod
-        popOutLen = max(popOutLen, coreFrames - fifoCapacity + fifoLength)
-        popOutLen = min(popOutLen, newFifoLength)
-
-        let popOutEmbs = Array(tempFifoEmb[0..<(popOutLen * dim)])
-        let popOutPreds = Array(tempFifoPred[0..<(popOutLen * nSpk)])
-
-        AOSCCompressor.updateSilenceProfile(
-            meanSilEmb: &meanSilEmb, nSilFrames: &nSilFrames,
-            embSeq: popOutEmbs, preds: popOutPreds,
-            nNewFrames: popOutLen, embDim: dim, nSpk: nSpk,
-            silThreshold: config.silThreshold)
-
-        let remainingFifo = newFifoLength - popOutLen
-        for f in 0..<remainingFifo {
-            let srcFrame = popOutLen + f
-            for d in 0..<dim { fifo[f * dim + d] = tempFifoEmb[srcFrame * dim + d] }
-            for s in 0..<nSpk { fifoPreds[f * nSpk + s] = tempFifoPred[srcFrame * nSpk + s] }
-        }
-        fifoLength = remainingFifo
-
-        let oldSpkcacheLength = spkcacheLength
-        let newSpkcacheLength = spkcacheLength + popOutLen
-
-        if newSpkcacheLength <= cacheCapacity {
-            for f in 0..<popOutLen {
-                let dstFrame = spkcacheLength + f
-                for d in 0..<dim { spkcache[dstFrame * dim + d] = popOutEmbs[f * dim + d] }
-            }
-            if hasSpkcachePreds {
-                for f in 0..<popOutLen {
-                    let dstFrame = spkcacheLength + f
-                    for s in 0..<nSpk { spkcachePreds[dstFrame * nSpk + s] = popOutPreds[f * nSpk + s] }
-                }
-            }
-            spkcacheLength = newSpkcacheLength
-        } else {
-            var combinedEmbs = [Float](repeating: 0, count: newSpkcacheLength * dim)
-            for i in 0..<(oldSpkcacheLength * dim) { combinedEmbs[i] = spkcache[i] }
-            for f in 0..<popOutLen {
-                let dstFrame = oldSpkcacheLength + f
-                for d in 0..<dim { combinedEmbs[dstFrame * dim + d] = popOutEmbs[f * dim + d] }
-            }
-
-            var combinedPreds = [Float](repeating: 0, count: newSpkcacheLength * nSpk)
-            if hasSpkcachePreds {
-                for i in 0..<(oldSpkcacheLength * nSpk) { combinedPreds[i] = spkcachePreds[i] }
-            } else {
-                for f in 0..<oldSpkcacheLength {
-                    for s in 0..<nSpk { combinedPreds[f * nSpk + s] = output.speakerPreds[f * nSpk + s] }
-                }
-            }
-            for f in 0..<popOutLen {
-                let dstFrame = oldSpkcacheLength + f
-                for s in 0..<nSpk { combinedPreds[dstFrame * nSpk + s] = popOutPreds[f * nSpk + s] }
-            }
-
-            let result = AOSCCompressor.compress(
-                embSeq: combinedEmbs, preds: combinedPreds,
-                nFrames: newSpkcacheLength, meanSilEmb: meanSilEmb, config: config)
-
-            for i in 0..<(cacheCapacity * dim) { spkcache[i] = result.spkcache[i] }
-            for i in 0..<(cacheCapacity * nSpk) { spkcachePreds[i] = result.spkcachePreds[i] }
-            spkcacheLength = cacheCapacity
-            hasSpkcachePreds = true
         }
     }
 }

@@ -54,7 +54,7 @@ enum PowersetDecoder {
         for (i, prob) in probs.enumerated() {
             let time = Float(i) * frameDuration
 
-            if !inSpeech && prob >= onset {
+            if !inSpeech && prob > onset {
                 inSpeech = true
                 speechStart = time
             } else if inSpeech && prob < offset {
@@ -64,7 +64,7 @@ enum PowersetDecoder {
         }
 
         if inSpeech {
-            let endTime = Float(probs.count) * frameDuration
+            let endTime = Float(probs.count - 1) * frameDuration
             segments.append((speechStart, endTime))
         }
 

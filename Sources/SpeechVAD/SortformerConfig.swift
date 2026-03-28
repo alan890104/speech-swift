@@ -72,9 +72,9 @@ public struct SortformerConfig: Sendable {
     public var padOnset: Float
     /// Duration (seconds) to append after each detected speech segment
     public var padOffset: Float
-    /// Minimum speech segment duration in seconds (after padding); shorter segments are discarded
+    /// Minimum speech segment duration in seconds; shorter segments are removed (NeMo min_duration_on)
     public var minSpeechDuration: Float
-    /// Minimum silence gap to split segments, in seconds
+    /// Minimum silence gap duration in seconds; shorter gaps are filled (NeMo min_duration_off)
     public var minSilenceDuration: Float
 
     // MARK: - Presets
@@ -109,8 +109,8 @@ public struct SortformerConfig: Sendable {
         offset: 1.0,
         padOnset: 0.063,
         padOffset: 0.002,
-        minSpeechDuration: 0.151,
-        minSilenceDuration: 0.007
+        minSpeechDuration: 0.007,
+        minSilenceDuration: 0.151
     )
 
     public init(
@@ -138,8 +138,8 @@ public struct SortformerConfig: Sendable {
         offset: Float = 1.0,
         padOnset: Float = 0.063,
         padOffset: Float = 0.002,
-        minSpeechDuration: Float = 0.151,
-        minSilenceDuration: Float = 0.007
+        minSpeechDuration: Float = 0.007,
+        minSilenceDuration: Float = 0.151
     ) {
         self.nMels = nMels
         self.nFFT = nFFT

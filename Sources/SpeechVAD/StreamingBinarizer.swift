@@ -7,87 +7,97 @@ import AudioCommon
 /// 1. `binarization()` — frame-by-frame onset/offset detection + pad_onset/pad_offset
 /// 2. `filtering()` — remove short speech segments, fill short silence gaps
 ///
-/// This struct accumulates per-frame probabilities and produces segments
-/// incrementally. Since NeMo's filtering requires seeing all segments
-/// (to find gaps and merge), final filtering is deferred to `flush()`.
+/// Reference:
+///   Paper: Gregory Gelly and Jean-Luc Gauvain. "Minimum Word Error Training of
+///          RNN-based Voice Activity Detection", InterSpeech 2015.
+///   Implementation: https://github.com/pyannote/pyannote-audio/blob/master/pyannote/audio/utils/signal.py
 ///
-/// During `process()`, raw binarized segments are accumulated internally.
-/// `flush()` applies filtering (short speech removal + short gap filling)
-/// and returns the final result.
+/// All time arithmetic uses Double (64-bit) internally, matching Python's native
+/// `float` precision in NeMo. Converts to Float only at the output boundary
+/// (DiarizedSegment). This eliminates ~1e-7 drift vs NeMo on long sequences.
+///
+/// All helper functions (`mergeOverlapSegment`, `filterShortSegments`,
+/// `getGapSegments`, `removeSegments`) match NeMo's `vad_utils.py` verbatim
+/// in algorithm, translated from PyTorch tensor ops to Swift arrays.
 struct StreamingBinarizer {
 
-    private let numSpeakers: Int
-    private let onset: Float
-    private let offset: Float
-    private let padOnset: Float
-    private let padOffset: Float
-    private let frameDuration: Float
+    // Internal segment type using Double (matches Python float64 precision)
+    private struct Seg {
+        let start: Double
+        let end: Double
+    }
 
-    /// NeMo filtering parameters
-    private let minDurationOn: Float   // short non-speech gap deletion threshold
-    private let minDurationOff: Float  // short speech segment deletion threshold
+    private let numSpeakers: Int
+    private let onset: Double
+    private let offset: Double
+    private let padOnset: Double
+    private let padOffset: Double
+    private let frameDuration: Double
+    private let minDurationOn: Double
+    private let minDurationOff: Double
+    private let filterSpeechFirst: Double
 
     /// Per-speaker: whether currently in speech state
     private var inSpeech: [Bool]
-    /// Per-speaker: start time of current speech region (frame time, before padding)
-    private var speechStart: [Float]
-    /// Per-speaker: accumulated raw segments (with padding, before filtering)
-    private var rawSegments: [[DiarizedSegment]]
+    /// Per-speaker: start time of current speech region (Double precision)
+    private var speechStart: [Double]
+    /// Per-speaker: accumulated raw segments (Double precision, before filtering)
+    private var rawSegments: [[Seg]]
 
+    /// Defaults match NeMo's `binarization()` and `filtering()` function defaults.
+    /// Callers should pass application-specific values (e.g. DIHARD3, CallHome).
     init(
         numSpeakers: Int,
-        onset: Float = 0.56,
-        offset: Float = 1.0,
-        padOnset: Float = 0.063,
-        padOffset: Float = 0.002,
-        minDurationOn: Float = 0.007,
-        minDurationOff: Float = 0.151,
-        frameDuration: Float = 0.08
+        onset: Float = 0.5,
+        offset: Float = 0.5,
+        padOnset: Float = 0.0,
+        padOffset: Float = 0.0,
+        minDurationOn: Float = 0.0,
+        minDurationOff: Float = 0.0,
+        filterSpeechFirst: Float = 1.0,
+        frameDuration: Float = 0.01
     ) {
         self.numSpeakers = numSpeakers
-        self.onset = onset
-        self.offset = offset
-        self.padOnset = padOnset
-        self.padOffset = padOffset
-        self.minDurationOn = minDurationOn
-        self.minDurationOff = minDurationOff
-        self.frameDuration = frameDuration
+        self.onset = Double(onset)
+        self.offset = Double(offset)
+        self.padOnset = Double(padOnset)
+        self.padOffset = Double(padOffset)
+        self.minDurationOn = Double(minDurationOn)
+        self.minDurationOff = Double(minDurationOff)
+        self.filterSpeechFirst = Double(filterSpeechFirst)
+        self.frameDuration = Double(frameDuration)
         self.inSpeech = [Bool](repeating: false, count: numSpeakers)
-        self.speechStart = [Float](repeating: 0, count: numSpeakers)
-        self.rawSegments = [[DiarizedSegment]](repeating: [], count: numSpeakers)
+        self.speechStart = [Double](repeating: 0, count: numSpeakers)
+        self.rawSegments = [[Seg]](repeating: [], count: numSpeakers)
     }
 
-    /// Process new prediction frames. Segments accumulate internally;
-    /// call `flush()` to get filtered final output.
-    ///
-    /// - Parameters:
-    ///   - probs: Flat `[nFrames * numSpeakers]` probabilities in [0, 1]
-    ///   - nFrames: Number of new frames
-    ///   - baseTime: Timestamp of the first frame
+    /// Process new prediction frames (NeMo `binarization()` core loop).
+    /// Segments accumulate internally; call `flush()` to get filtered final output.
     mutating func process(probs: [Float], nFrames: Int, baseTime: Float) {
+        let baseTimeD = Double(baseTime)
+
         for f in 0..<nFrames {
-            let time = baseTime + Float(f) * frameDuration
+            // NeMo: i * frame_length_in_sec (Python float = float64)
+            let time = baseTimeD + Double(f) * frameDuration
 
             for s in 0..<numSpeakers {
-                var prob = probs[f * numSpeakers + s]
-                if prob > 1.0 || prob < 0.0 {
-                    prob = 1.0 / (1.0 + exp(-prob))
-                }
+                let prob = Double(probs[f * numSpeakers + s])
 
+                // Current frame is speech
                 if inSpeech[s] {
-                    // NeMo: if sequence[i] < offset → end speech
+                    // Switch from speech to non-speech
                     if prob < offset {
-                        let segStart = max(0, speechStart[s] - padOnset)
                         let segEnd = time + padOffset
+                        let segStart = max(0, speechStart[s] - padOnset)
                         if segEnd > segStart {
-                            rawSegments[s].append(DiarizedSegment(
-                                startTime: segStart, endTime: segEnd, speakerId: s))
+                            rawSegments[s].append(Seg(start: segStart, end: segEnd))
                         }
                         speechStart[s] = time
                         inSpeech[s] = false
                     }
+                // Current frame is non-speech
                 } else {
-                    // NeMo: if sequence[i] > onset → start speech
+                    // Switch from non-speech to speech
                     if prob > onset {
                         speechStart[s] = time
                         inSpeech[s] = true
@@ -97,36 +107,41 @@ struct StreamingBinarizer {
         }
     }
 
-    /// Finalize: close open segments, then apply NeMo filtering
-    /// (short speech deletion + short gap filling).
+    /// Finalize: close open segments, then apply NeMo filtering.
     ///
-    /// - Parameter endTime: Timestamp of audio end
+    /// - Parameter endTime: Time of the last frame processed (matching NeMo's
+    ///   `i * frame_length_in_sec` after the loop, where `i = len(sequence) - 1`).
     /// - Returns: Filtered, merged segments sorted by start time
     mutating func flush(endTime: Float) -> [DiarizedSegment] {
-        // Close any open speech segments
+        let endTimeD = Double(endTime)
+
+        // if it's speech at the end, add final segment
         for s in 0..<numSpeakers {
             if inSpeech[s] {
                 let segStart = max(0, speechStart[s] - padOnset)
-                let segEnd = endTime + padOffset
-                if segEnd > segStart {
-                    rawSegments[s].append(DiarizedSegment(
-                        startTime: segStart, endTime: segEnd, speakerId: s))
-                }
+                let segEnd = endTimeD + padOffset
+                rawSegments[s].append(Seg(start: segStart, end: segEnd))
                 inSpeech[s] = false
             }
         }
 
-        // Apply NeMo filtering per speaker, then merge all
-        var allSegments = [DiarizedSegment]()
+        // Merge the overlapped speech segments due to padding, then apply filtering
+        var tagged = [(start: Double, end: Double, speaker: Int)]()
         for s in 0..<numSpeakers {
-            var segs = mergeOverlapping(rawSegments[s])
-            segs = applyFiltering(segs, speakerId: s)
-            allSegments.append(contentsOf: segs)
+            var segs = mergeOverlapSegment(rawSegments[s])
+            segs = filtering(segs)
+            for seg in segs {
+                tagged.append((seg.start, seg.end, s))
+            }
         }
-        rawSegments = [[DiarizedSegment]](repeating: [], count: numSpeakers)
+        rawSegments = [[Seg]](repeating: [], count: numSpeakers)
 
-        allSegments.sort { $0.startTime < $1.startTime }
-        return allSegments
+        tagged.sort { $0.start < $1.start }
+
+        // Convert Double → Float at the output boundary
+        return tagged.map {
+            DiarizedSegment(startTime: Float($0.start), endTime: Float($0.end), speakerId: $0.speaker)
+        }
     }
 
     /// Which speakers are currently in speech state.
@@ -137,65 +152,105 @@ struct StreamingBinarizer {
     /// Reset all state for a new audio session.
     mutating func reset() {
         inSpeech = [Bool](repeating: false, count: numSpeakers)
-        speechStart = [Float](repeating: 0, count: numSpeakers)
-        rawSegments = [[DiarizedSegment]](repeating: [], count: numSpeakers)
+        speechStart = [Double](repeating: 0, count: numSpeakers)
+        rawSegments = [[Seg]](repeating: [], count: numSpeakers)
     }
 
-    // MARK: - NeMo filtering (matches vad_utils.py filtering())
+    // MARK: - NeMo vad_utils.py helper functions (all Double precision)
 
-    /// Merge overlapping segments (after padding may cause overlaps).
-    private func mergeOverlapping(_ segments: [DiarizedSegment]) -> [DiarizedSegment] {
-        guard !segments.isEmpty else { return [] }
-        let sorted = segments.sorted { $0.startTime < $1.startTime }
-        var merged = [sorted[0]]
-        for seg in sorted.dropFirst() {
-            if seg.startTime <= merged.last!.endTime {
-                let last = merged.removeLast()
-                merged.append(DiarizedSegment(
-                    startTime: last.startTime,
-                    endTime: max(last.endTime, seg.endTime),
-                    speakerId: last.speakerId))
-            } else {
-                merged.append(seg)
-            }
+    /// Matches NeMo `merge_overlap_segment()` (vad_utils.py lines 455-475).
+    /// Vectorized algorithm: compute merge boundaries, extract group heads/tails.
+    private func mergeOverlapSegment(_ segments: [Seg]) -> [Seg] {
+        if segments.isEmpty || segments.count == 1 {
+            return segments
         }
-        return merged
+
+        let sorted = segments.sorted { $0.start < $1.start }
+
+        // NeMo: merge_boundary = segments[:-1, 1] >= segments[1:, 0]
+        var mergeBoundary = [Bool]()
+        for i in 0..<(sorted.count - 1) {
+            mergeBoundary.append(sorted[i].end >= sorted[i + 1].start)
+        }
+
+        // NeMo: head_padded = F.pad(merge_boundary, [1, 0], value=0.0)
+        let headPadded = [false] + mergeBoundary
+        // NeMo: tail_padded = F.pad(merge_boundary, [0, 1], value=0.0)
+        let tailPadded = mergeBoundary + [false]
+
+        // NeMo: head = segments[~head_padded, 0]
+        // NeMo: tail = segments[~tail_padded, 1]
+        var heads = [Double]()
+        var tails = [Double]()
+        for i in 0..<sorted.count {
+            if !headPadded[i] { heads.append(sorted[i].start) }
+            if !tailPadded[i] { tails.append(sorted[i].end) }
+        }
+
+        // NeMo: merged = torch.stack((head, tail), dim=1)
+        return (0..<heads.count).map { Seg(start: heads[$0], end: tails[$0]) }
     }
 
-    /// NeMo's filtering: filter_speech_first=1.0 (default).
-    /// 1. Remove speech segments shorter than minDurationOn
-    /// 2. Fill non-speech gaps shorter than minDurationOff
-    private func applyFiltering(_ segments: [DiarizedSegment], speakerId: Int) -> [DiarizedSegment] {
+    /// Matches NeMo `filter_short_segments()` (vad_utils.py lines 479-487).
+    private func filterShortSegments(_ segments: [Seg], threshold: Double) -> [Seg] {
+        return segments.filter { $0.end - $0.start >= threshold }
+    }
+
+    /// Matches NeMo `get_gap_segments()` (vad_utils.py lines 601-608).
+    private func getGapSegments(_ segments: [Seg]) -> [Seg] {
+        let sorted = segments.sorted { $0.start < $1.start }
+        return (0..<(sorted.count - 1)).map {
+            Seg(start: sorted[$0].end, end: sorted[$0 + 1].start)
+        }
+    }
+
+    /// Matches NeMo `remove_segments()` (vad_utils.py lines 587-597).
+    private func removeSegments(_ original: [Seg], removing toBeRemoved: [Seg]) -> [Seg] {
+        var result = original
+        for y in toBeRemoved {
+            result = result.filter { !($0.start == y.start && $0.end == y.end) }
+        }
+        return result
+    }
+
+    /// Matches NeMo `filtering()` (vad_utils.py lines 612-679).
+    private func filtering(_ segments: [Seg]) -> [Seg] {
         guard !segments.isEmpty else { return [] }
         var segs = segments
 
-        // Step 1: Remove short speech segments
-        if minDurationOn > 0 {
-            segs = segs.filter { $0.endTime - $0.startTime >= minDurationOn }
-        }
-        guard !segs.isEmpty else { return [] }
-
-        // Step 2: Fill short non-speech gaps
-        if minDurationOff > 0 && segs.count > 1 {
-            // Find gaps
-            var gaps = [(start: Float, end: Float)]()
-            let sorted = segs.sorted { $0.startTime < $1.startTime }
-            for i in 0..<(sorted.count - 1) {
-                gaps.append((sorted[i].endTime, sorted[i + 1].startTime))
+        if filterSpeechFirst == 1.0 {
+            // Filter out the shorter speech segments
+            if minDurationOn > 0 {
+                segs = filterShortSegments(segs, threshold: minDurationOn)
             }
-
-            // Find short gaps (< minDurationOff) and add them as speech
-            var extra = [DiarizedSegment]()
-            for gap in gaps {
-                if gap.end - gap.start < minDurationOff {
-                    extra.append(DiarizedSegment(
-                        startTime: gap.start, endTime: gap.end, speakerId: speakerId))
-                }
+            // Filter out the shorter non-speech segments and return to be as speech segments
+            if minDurationOff > 0 {
+                // Find non-speech segments
+                let nonSpeechSegments = getGapSegments(segs)
+                // Find shorter non-speech segments
+                let shortNonSpeechSegments = removeSegments(
+                    nonSpeechSegments,
+                    removing: filterShortSegments(nonSpeechSegments, threshold: minDurationOff))
+                // Return shorter non-speech segments to be as speech segments
+                segs.append(contentsOf: shortNonSpeechSegments)
+                // Merge the overlapped speech segments
+                segs = mergeOverlapSegment(segs)
             }
+        } else {
+            if minDurationOff > 0 {
+                // Find non-speech segments
+                let nonSpeechSegments = getGapSegments(segs)
+                // Find shorter non-speech segments
+                let shortNonSpeechSegments = removeSegments(
+                    nonSpeechSegments,
+                    removing: filterShortSegments(nonSpeechSegments, threshold: minDurationOff))
 
-            if !extra.isEmpty {
-                segs.append(contentsOf: extra)
-                segs = mergeOverlapping(segs)
+                segs.append(contentsOf: shortNonSpeechSegments)
+                // Merge the overlapped speech segments
+                segs = mergeOverlapSegment(segs)
+            }
+            if minDurationOn > 0 {
+                segs = filterShortSegments(segs, threshold: minDurationOn)
             }
         }
 
