@@ -123,6 +123,7 @@ public final class StreamingSortformerDiarizer {
     ///   - progressHandler: callback for download progress
     public static func fromPretrained(
         modelId: String = defaultModelId,
+        config: SortformerConfig = .default,
         lookahead: Float? = nil,
         progressHandler: ((Double, String) -> Void)? = nil,
         useOfflineMode: Bool? = nil
@@ -152,11 +153,10 @@ public final class StreamingSortformerDiarizer {
         mlConfig.computeUnits = .cpuAndNeuralEngine
         let mlModel = try MLModel(contentsOf: modelURL, configuration: mlConfig)
 
-        let sortConfig = SortformerConfig.default
-        let coremlModel = SortformerCoreMLModel(model: mlModel, config: sortConfig)
+        let coremlModel = SortformerCoreMLModel(model: mlModel, config: config)
 
         progressHandler?(1.0, "Ready")
-        return StreamingSortformerDiarizer(model: coremlModel, config: sortConfig, lookahead: lookahead)
+        return StreamingSortformerDiarizer(model: coremlModel, config: config, lookahead: lookahead)
     }
 
     // MARK: - Public API

@@ -54,6 +54,7 @@ public final class SortformerDiarizer {
     /// - Returns: ready-to-use diarizer
     public static func fromPretrained(
         modelId: String = defaultModelId,
+        config: SortformerConfig = .default,
         progressHandler: ((Double, String) -> Void)? = nil,
         useOfflineMode: Bool? = nil
     ) async throws -> SortformerDiarizer {
@@ -93,7 +94,6 @@ public final class SortformerDiarizer {
                 underlying: error)
         }
 
-        let config = SortformerConfig.default
         let coremlModel = SortformerCoreMLModel(model: mlModel, config: config)
 
         progressHandler?(1.0, "Ready")
