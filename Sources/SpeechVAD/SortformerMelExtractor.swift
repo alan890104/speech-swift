@@ -13,7 +13,7 @@ import Accelerate
 /// - Power spectrum (vs magnitude spectrum)
 class SortformerMelExtractor {
     let sampleRate: Int
-    let nFFT: Int
+    let winLength: Int
     let hopLength: Int
     let nMels: Int
 
@@ -25,7 +25,7 @@ class SortformerMelExtractor {
 
     init(config: SortformerConfig = .default) {
         self.sampleRate = config.sampleRate
-        self.nFFT = config.nFFT
+        self.winLength = config.winLength
         self.hopLength = config.hopLength
         self.nMels = config.nMels
 
@@ -33,9 +33,9 @@ class SortformerMelExtractor {
         let nBins = halfPadded + 1
 
         // Hann window (NeMo default, no Povey modification)
-        window = [Float](repeating: 0, count: config.nFFT)
-        for i in 0..<config.nFFT {
-            window[i] = 0.5 - 0.5 * cos(2.0 * Float.pi * Float(i) / Float(config.nFFT - 1))
+        window = [Float](repeating: 0, count: config.winLength)
+        for i in 0..<config.winLength {
+            window[i] = 0.5 - 0.5 * cos(2.0 * Float.pi * Float(i) / Float(config.winLength - 1))
         }
 
         guard let setup = vDSP_create_fftsetup(log2PaddedFFT, FFTRadix(kFFTRadix2)) else {
@@ -186,7 +186,7 @@ class SortformerMelExtractor {
 
         if !streamStarted {
             // First chunk: add zero padding at the beginning (NeMo: pad_mode="constant")
-            let padLen = nFFT / 2
+            let padLen = winLength / 2
             streamBuffer = [Float](repeating: 0, count: padLen)
             streamStarted = true
         }
@@ -197,7 +197,7 @@ class SortformerMelExtractor {
         while true {
             let globalStart = streamFramesExtracted * hopLength
             let localStart = globalStart - streamBaseOffset
-            guard localStart >= 0, localStart + nFFT <= streamBuffer.count else { break }
+            guard localStart >= 0, localStart + winLength <= streamBuffer.count else { break }
 
             streamBuffer.withUnsafeBufferPointer { buf in
                 let frameMel = computeSingleFrameMel(samples: buf.baseAddress! + localStart)
@@ -225,7 +225,7 @@ class SortformerMelExtractor {
         guard streamStarted else { return [] }
 
         // Add zero padding at the end (NeMo: center=True, pad_mode="constant")
-        let padLen = nFFT / 2
+        let padLen = winLength / 2
         streamBuffer.append(contentsOf: [Float](repeating: 0, count: padLen))
 
         // Extract remaining frames
@@ -233,7 +233,7 @@ class SortformerMelExtractor {
         while true {
             let globalStart = streamFramesExtracted * hopLength
             let localStart = globalStart - streamBaseOffset
-            guard localStart >= 0, localStart + nFFT <= streamBuffer.count else { break }
+            guard localStart >= 0, localStart + winLength <= streamBuffer.count else { break }
 
             streamBuffer.withUnsafeBufferPointer { buf in
                 newMel.append(contentsOf: computeSingleFrameMel(samples: buf.baseAddress! + localStart))
@@ -246,15 +246,15 @@ class SortformerMelExtractor {
 
     /// Compute mel spectrum for a single FFT frame.
     ///
-    /// - Parameter samples: Pointer to `nFFT` contiguous audio samples (already in correct position)
+    /// - Parameter samples: Pointer to `winLength` contiguous audio samples (already in correct position)
     /// - Returns: `[nMels]` log-mel values
     private func computeSingleFrameMel(samples: UnsafePointer<Float>) -> [Float] {
         let nBins = paddedFFT / 2 + 1
         let halfPadded = paddedFFT / 2
 
         // Window
-        vDSP_vmul(samples, 1, window, 1, &sfPaddedFrame, 1, vDSP_Length(nFFT))
-        for i in nFFT..<paddedFFT { sfPaddedFrame[i] = 0 }
+        vDSP_vmul(samples, 1, window, 1, &sfPaddedFrame, 1, vDSP_Length(winLength))
+        for i in winLength..<paddedFFT { sfPaddedFrame[i] = 0 }
 
         // Deinterleave for split complex
         for i in 0..<halfPadded {
@@ -318,14 +318,14 @@ class SortformerMelExtractor {
         }
 
         // Zero padding (NeMo: center=True, pad_mode="constant")
-        let padLength = nFFT / 2
+        let padLength = winLength / 2
         var paddedAudio = [Float](repeating: 0, count: padLength + preemphed.count + padLength)
         // Left and right padding are already zero from initialization
         for i in 0..<preemphed.count {
             paddedAudio[padLength + i] = preemphed[i]
         }
 
-        let nFrames = (paddedAudio.count - nFFT) / hopLength + 1
+        let nFrames = (paddedAudio.count - winLength) / hopLength + 1
 
         var splitReal = [Float](repeating: 0, count: halfPadded)
         var splitImag = [Float](repeating: 0, count: halfPadded)
@@ -336,9 +336,9 @@ class SortformerMelExtractor {
             let start = frame * hopLength
 
             paddedAudio.withUnsafeBufferPointer { buf in
-                vDSP_vmul(buf.baseAddress! + start, 1, window, 1, &paddedFrame, 1, vDSP_Length(nFFT))
+                vDSP_vmul(buf.baseAddress! + start, 1, window, 1, &paddedFrame, 1, vDSP_Length(winLength))
             }
-            for i in nFFT..<paddedFFT {
+            for i in winLength..<paddedFFT {
                 paddedFrame[i] = 0
             }
 

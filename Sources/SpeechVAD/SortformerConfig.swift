@@ -11,8 +11,8 @@ public struct SortformerConfig: Sendable {
 
     /// Number of mel frequency bins
     public let nMels: Int
-    /// FFT window size in samples
-    public let nFFT: Int
+    /// Window size in samples (NeMo n_window_size; FFT is zero-padded to 512)
+    public let winLength: Int
     /// Hop length in samples
     public let hopLength: Int
     /// Expected input sample rate in Hz
@@ -86,7 +86,7 @@ public struct SortformerConfig: Sendable {
     /// `diar_streaming_sortformer_4spk-v2_dihard3-dev.yaml` (multi-language, multi-scenario).
     public static let `default` = SortformerConfig(
         nMels: 128,
-        nFFT: 400,
+        winLength: 400,
         hopLength: 160,
         sampleRate: 16000,
         chunkLenSeconds: 6.0,
@@ -115,7 +115,7 @@ public struct SortformerConfig: Sendable {
 
     public init(
         nMels: Int = 128,
-        nFFT: Int = 400,
+        winLength: Int = 400,
         hopLength: Int = 160,
         sampleRate: Int = 16000,
         chunkLenSeconds: Float = 6.0,
@@ -142,7 +142,7 @@ public struct SortformerConfig: Sendable {
         minSilenceDuration: Float = 0.151
     ) {
         self.nMels = nMels
-        self.nFFT = nFFT
+        self.winLength = winLength
         self.hopLength = hopLength
         self.sampleRate = sampleRate
         self.chunkLenSeconds = chunkLenSeconds
