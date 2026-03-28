@@ -15,7 +15,7 @@ public struct DiarizeCommand: ParsableCommand {
     @Option(name: .long, help: "Enrollment audio for target speaker extraction")
     public var targetSpeaker: String?
 
-    @Option(name: .long, help: "Diarization engine: pyannote (default) or sortformer")
+    @Option(name: .long, help: "Diarization engine: pyannote (default), sortformer, or sortformer-streaming")
     public var engine: String = "pyannote"
 
     @Option(name: .long, help: "Speaker embedding engine: mlx (default) or coreml")
@@ -53,9 +53,9 @@ public struct DiarizeCommand: ParsableCommand {
                 minSilenceDuration: minSilence,
                 clusteringThreshold: clusterThreshold)
 
-            if engine == "sortformer" {
+            if engine == "sortformer" || engine == "sortformer-streaming" {
                 #if canImport(CoreML)
-                try await runSortformer(audio: audio, config: config)
+                try await runSortformer(audio: audio, config: config, streaming: engine == "sortformer-streaming")
                 #else
                 print("Error: Sortformer requires CoreML (not available on this platform).")
                 #endif
@@ -68,20 +68,33 @@ public struct DiarizeCommand: ParsableCommand {
     }
 
     #if canImport(CoreML)
-    private func runSortformer(audio: [Float], config: DiarizationConfig) async throws {
+    private func runSortformer(audio: [Float], config: DiarizationConfig, streaming: Bool = false) async throws {
         if targetSpeaker != nil {
             print("Warning: --target-speaker is not supported with Sortformer (no speaker embeddings). Ignoring.")
         }
 
-        print("Loading Sortformer model...")
-        let diarizer = try await SortformerDiarizer.fromPretrained(
-            progressHandler: reportProgress
-        )
+        let result: DiarizationResult
+        let elapsed: TimeInterval
 
-        print("Running diarization (Sortformer)...")
-        let start = Date()
-        let result = diarizer.diarize(audio: audio, sampleRate: 16000, config: config)
-        let elapsed = Date().timeIntervalSince(start)
+        if streaming {
+            print("Loading Sortformer model (streaming)...")
+            let diarizer = try await StreamingSortformerDiarizer.fromPretrained(
+                progressHandler: reportProgress
+            )
+            print("Running diarization (Sortformer streaming, ~550KB fixed memory)...")
+            let start = Date()
+            result = diarizer.diarize(audio: audio, sampleRate: 16000)
+            elapsed = Date().timeIntervalSince(start)
+        } else {
+            print("Loading Sortformer model...")
+            let diarizer = try await SortformerDiarizer.fromPretrained(
+                progressHandler: reportProgress
+            )
+            print("Running diarization (Sortformer)...")
+            let start = Date()
+            result = diarizer.diarize(audio: audio, sampleRate: 16000, config: config)
+            elapsed = Date().timeIntervalSince(start)
+        }
 
         outputResult(result, elapsed: elapsed)
 
