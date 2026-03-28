@@ -144,6 +144,8 @@ class SortformerMelExtractor {
     private var streamFramesExtracted: Int = 0
     /// Whether the first chunk has been processed (for left reflect padding)
     private var streamStarted: Bool = false
+    /// Last audio sample for pre-emphasis continuity across chunks
+    private var preemphLastSample: Float = 0
 
     /// Reusable buffers for single-frame FFT (avoid allocation per frame)
     private var sfPaddedFrame: [Float]
@@ -160,6 +162,7 @@ class SortformerMelExtractor {
         streamBaseOffset = 0
         streamFramesExtracted = 0
         streamStarted = false
+        preemphLastSample = 0
     }
 
     /// Extract mel frames incrementally from new audio samples.
@@ -173,18 +176,26 @@ class SortformerMelExtractor {
     func extractIncremental(newSamples: [Float]) -> [Float] {
         guard !newSamples.isEmpty else { return [] }
 
+        // Apply pre-emphasis: y[n] = x[n] - 0.97 * x[n-1]
+        var preemphed = [Float](repeating: 0, count: newSamples.count)
+        preemphed[0] = newSamples[0] - 0.97 * preemphLastSample
+        for i in 1..<newSamples.count {
+            preemphed[i] = newSamples[i] - 0.97 * newSamples[i - 1]
+        }
+        preemphLastSample = newSamples[newSamples.count - 1]
+
         if !streamStarted {
             // First chunk: add reflect padding at the beginning
             let padLen = nFFT / 2
             var pad = [Float](repeating: 0, count: padLen)
             for i in 0..<padLen {
-                let srcIdx = min(padLen - i, newSamples.count - 1)
-                pad[i] = newSamples[max(0, srcIdx)]
+                let srcIdx = min(padLen - i, preemphed.count - 1)
+                pad[i] = preemphed[max(0, srcIdx)]
             }
             streamBuffer = pad
             streamStarted = true
         }
-        streamBuffer.append(contentsOf: newSamples)
+        streamBuffer.append(contentsOf: preemphed)
 
         // Extract all possible new frames
         var newMel = [Float]()
@@ -291,7 +302,7 @@ class SortformerMelExtractor {
 
         // Log-mel
         var countN = Int32(nMels)
-        var epsilon: Float = 1e-10
+        var epsilon: Float = 5.960464477539063e-08  // NeMo log_zero_guard: 2^-24
         vDSP_vclip(sfMelFrame, 1, &epsilon, [Float.greatestFiniteMagnitude], &sfMelFrame, 1, vDSP_Length(nMels))
         vvlogf(&sfMelFrame, sfMelFrame, &countN)
 
@@ -308,24 +319,30 @@ class SortformerMelExtractor {
         let nBins = paddedFFT / 2 + 1
         let halfPadded = paddedFFT / 2
 
-        // No pre-emphasis for Sortformer (NeMo default)
-
         guard !audio.isEmpty else { return ([], 0) }
+
+        // Pre-emphasis (NeMo default: preemph=0.97)
+        // y[n] = x[n] - 0.97 * x[n-1]
+        var preemphed = [Float](repeating: 0, count: audio.count)
+        preemphed[0] = audio[0]
+        for i in 1..<audio.count {
+            preemphed[i] = audio[i] - 0.97 * audio[i - 1]
+        }
 
         // Reflect padding (same as torch.stft with center=True)
         let padLength = nFFT / 2
-        var paddedAudio = [Float](repeating: 0, count: padLength + audio.count + padLength)
+        var paddedAudio = [Float](repeating: 0, count: padLength + preemphed.count + padLength)
 
         for i in 0..<padLength {
-            let srcIdx = min(padLength - i, audio.count - 1)
-            paddedAudio[i] = audio[max(0, srcIdx)]
+            let srcIdx = min(padLength - i, preemphed.count - 1)
+            paddedAudio[i] = preemphed[max(0, srcIdx)]
         }
-        for i in 0..<audio.count {
-            paddedAudio[padLength + i] = audio[i]
+        for i in 0..<preemphed.count {
+            paddedAudio[padLength + i] = preemphed[i]
         }
         for i in 0..<padLength {
-            let srcIdx = audio.count - 2 - i
-            paddedAudio[padLength + audio.count + i] = audio[max(0, srcIdx)]
+            let srcIdx = preemphed.count - 2 - i
+            paddedAudio[padLength + preemphed.count + i] = preemphed[max(0, srcIdx)]
         }
 
         let nFrames = (paddedAudio.count - nFFT) / hopLength + 1
@@ -380,7 +397,7 @@ class SortformerMelExtractor {
         let count = melSpec.count
         var countN = Int32(count)
 
-        var epsilon: Float = 1e-10
+        var epsilon: Float = 5.960464477539063e-08  // NeMo log_zero_guard: 2^-24
         vDSP_vclip(melSpec, 1, &epsilon, [Float.greatestFiniteMagnitude], &melSpec, 1, vDSP_Length(count))
         vvlogf(&melSpec, melSpec, &countN)
 
