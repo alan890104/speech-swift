@@ -58,7 +58,7 @@ public final class SileroVADModel {
 
     #if canImport(CoreML)
     /// CoreML compiled model (nil when using MLX engine).
-    var coremlModel: MLModel?
+    public internal(set) var coremlModel: MLModel?
     /// CoreML LSTM hidden state
     var coremlH: MLMultiArray?
     /// CoreML LSTM cell state
@@ -90,7 +90,7 @@ public final class SileroVADModel {
     }
 
     #if canImport(CoreML)
-    init(coremlModel: MLModel) {
+    public init(coremlModel: MLModel) {
         self.engine = .coreml
         self.network = nil
         self.coremlModel = coremlModel
