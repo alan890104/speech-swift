@@ -251,14 +251,16 @@ public final class SortformerDiarizer {
             }
 
             do {
-                let output = try model.predict(
-                    chunk: chunkMel,
-                    chunkLength: actualLen,
-                    spkcache: state.spkcache,
-                    spkcacheLength: state.spkcacheLength,
-                    fifo: state.fifo,
-                    fifoLength: state.fifoLength
-                )
+                let output = try autoreleasepool {
+                    try model.predict(
+                        chunk: chunkMel,
+                        chunkLength: actualLen,
+                        spkcache: state.spkcache,
+                        spkcacheLength: state.spkcacheLength,
+                        fifo: state.fifo,
+                        fifoLength: state.fifoLength
+                    )
+                }
 
                 // Extract core predictions (skip spkcache + fifo + left context,
                 // trim right context)

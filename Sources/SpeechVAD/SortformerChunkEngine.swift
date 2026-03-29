@@ -155,13 +155,17 @@ struct SortformerChunkEngine {
             }
 
             do {
-                let output = try model.predict(
-                    chunk: chunkMel,
-                    chunkLength: actualLen,
-                    spkcache: state.spkcache,
-                    spkcacheLength: state.spkcacheLength,
-                    fifo: state.fifo,
-                    fifoLength: state.fifoLength)
+                // autoreleasepool drains CoreML's MLMultiArray objects each iteration,
+                // preventing unbounded memory growth during long audio processing.
+                let output = try autoreleasepool {
+                    try model.predict(
+                        chunk: chunkMel,
+                        chunkLength: actualLen,
+                        spkcache: state.spkcache,
+                        spkcacheLength: state.spkcacheLength,
+                        fifo: state.fifo,
+                        fifoLength: state.fifoLength)
+                }
 
                 let validEmbs = output.validEmbFrames
                 let lcFrames = Int(Float(leftCtx) / Float(subFactor) + 0.5)
@@ -234,13 +238,15 @@ struct SortformerChunkEngine {
         }
 
         do {
-            let output = try model.predict(
-                chunk: chunkMel,
-                chunkLength: actualLen,
-                spkcache: state.spkcache,
-                spkcacheLength: state.spkcacheLength,
-                fifo: state.fifo,
-                fifoLength: state.fifoLength)
+            let output = try autoreleasepool {
+                try model.predict(
+                    chunk: chunkMel,
+                    chunkLength: actualLen,
+                    spkcache: state.spkcache,
+                    spkcacheLength: state.spkcacheLength,
+                    fifo: state.fifo,
+                    fifoLength: state.fifoLength)
+            }
 
             let validEmbs = output.validEmbFrames
             let lcFrames = Int(Float(leftCtx) / Float(subFactor) + 0.5)
