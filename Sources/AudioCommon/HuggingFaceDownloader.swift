@@ -80,6 +80,17 @@ public enum HuggingFaceDownloader {
         progressHandler: ((Double) -> Void)? = nil,
         useOfflineMode: Bool? = nil
     ) async throws {
+        // Fast path: offline mode + weights already on disk → skip HubApi.snapshot entirely.
+        // HubApi.snapshot requires .metadata sidecar files (commitHash/etag/timestamp) that
+        // are only written by HubApi itself. Downloaders such as swift-huggingface's HubClient
+        // put the weight files in the right place but don't create those sidecars, so calling
+        // snapshot(useOfflineMode: true) would always fail with "Metadata not available".
+        // If the weights are present we have nothing to download; just report completion.
+        if useOfflineMode == true, weightsExist(in: directory) {
+            progressHandler?(1.0)
+            return
+        }
+
         var globs: [String] = ["config.json"]
 
         let hasExplicitWeights = additionalFiles.contains { $0.hasSuffix(".safetensors") }
