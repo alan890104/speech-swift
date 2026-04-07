@@ -121,6 +121,33 @@ public final class StreamingSortformerDiarizer {
         return StreamingSortformerDiarizer(model: coremlModel, config: config, lookahead: lookahead)
     }
 
+    /// Load a Sortformer model from a local `.mlmodelc` path.
+    ///
+    /// Use this when the model has already been downloaded to a known location
+    /// by the host app's own download manager and you want to load it directly
+    /// without going through HuggingFace caching.
+    ///
+    /// - Parameters:
+    ///   - modelURL: URL to the compiled CoreML model bundle (`Sortformer.mlmodelc`).
+    ///   - config: Sortformer configuration.
+    ///   - lookahead: Lookahead in seconds. `nil` = full context (0.56s, max accuracy).
+    public static func fromModelURL(
+        _ modelURL: URL,
+        config: SortformerConfig = .default,
+        lookahead: Float? = nil
+    ) throws -> StreamingSortformerDiarizer {
+        guard FileManager.default.fileExists(atPath: modelURL.path) else {
+            throw AudioModelError.modelLoadFailed(
+                modelId: modelURL.lastPathComponent,
+                reason: "CoreML model not found at \(modelURL.path)")
+        }
+        let mlConfig = MLModelConfiguration()
+        mlConfig.computeUnits = .cpuAndNeuralEngine
+        let mlModel = try MLModel(contentsOf: modelURL, configuration: mlConfig)
+        let coremlModel = SortformerCoreMLModel(model: mlModel, config: config)
+        return StreamingSortformerDiarizer(model: coremlModel, config: config, lookahead: lookahead)
+    }
+
     // MARK: - Public API
 
     /// Push audio samples for processing.

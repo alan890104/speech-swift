@@ -27,7 +27,7 @@ public struct SpeakerFrame: Sendable {
 public final class SortformerDiarizer {
 
     /// Default HuggingFace model ID for the CoreML Sortformer model
-    public static let defaultModelId = "aufklarer/Sortformer-Diarization-CoreML"
+    public static let defaultModelId = "Alkd/Sortformer-Diarization-CoreML"
 
     private let model: SortformerCoreMLModel
     let config: SortformerConfig
